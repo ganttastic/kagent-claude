@@ -1,0 +1,23 @@
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: claude-agent
+  namespace: kagent
+spec:
+  description: Claude-powered coding agent via kagent-claude
+  type: BYO
+  byo:
+    deployment:
+      image: your-registry/claude-agent:latest
+      env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: anthropic-credentials
+              key: api-key
+        - name: KAGENT_URL
+          value: "http://kagent-controller:8083"
+        - name: KAGENT_NAME
+          value: "claude-agent"
+        - name: KAGENT_NAMESPACE
+          value: "kagent"
