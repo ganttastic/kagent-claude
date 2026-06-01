@@ -31,6 +31,7 @@ from kagent.core.tracing._span_processor import (
 )
 
 from ._session_store import ClaudeSessionStore
+from ._tracing import record_completion, record_message_event, trace_query
 
 logger = logging.getLogger(__name__)
 
@@ -125,54 +126,65 @@ class ClaudeAgentExecutor(AgentExecutor):
                 )
             )
 
-            # Stream Claude Agent SDK responses
+            # Stream Claude Agent SDK responses with tracing
             accumulated_text: list[str] = []
             new_session_id: str | None = None
-            try:
-                async for message in query(
-                    prompt=user_input,
-                    options=options,
-                ):
-                    # Capture session_id from SystemMessage init event
-                    if (
-                        new_session_id is None
-                        and isinstance(message, SystemMessage)
-                        and getattr(message, "subtype", None) == "init"
-                        and hasattr(message, "data")
-                        and isinstance(message.data, dict)
+            msg_index = 0
+            async with trace_query(
+                prompt=user_input,
+                session_id=claude_session_id,
+                context_id=context_id,
+                app_name=self.app_name,
+            ) as span:
+                try:
+                    async for message in query(
+                        prompt=user_input,
+                        options=options,
                     ):
-                        new_session_id = message.data.get("session_id")
+                        record_message_event(span, message, msg_index)
+                        msg_index += 1
 
-                    # Collect final result text (ResultMessage)
-                    if hasattr(message, "result") and message.result:
-                        accumulated_text.append(message.result)
+                        # Capture session_id from SystemMessage init event
+                        if (
+                            new_session_id is None
+                            and isinstance(message, SystemMessage)
+                            and getattr(message, "subtype", None) == "init"
+                            and hasattr(message, "data")
+                            and isinstance(message.data, dict)
+                        ):
+                            new_session_id = message.data.get("session_id")
 
-            except Exception as e:
-                logger.error(f"Error during Claude Agent SDK execution: {e}", exc_info=True)
-                await event_queue.enqueue_event(
-                    TaskStatusUpdateEvent(
-                        task_id=context.task_id,
-                        status=TaskStatus(
-                            state=TaskState.failed,
-                            timestamp=datetime.now(timezone.utc).isoformat(),
-                            message=Message(
-                                message_id=str(uuid.uuid4()),
-                                role=Role.agent,
-                                parts=[Part(TextPart(text=str(e)))],
+                        # Collect final result text (ResultMessage)
+                        if hasattr(message, "result") and message.result:
+                            accumulated_text.append(message.result)
+
+                except Exception as e:
+                    logger.error(f"Error during Claude Agent SDK execution: {e}", exc_info=True)
+                    await event_queue.enqueue_event(
+                        TaskStatusUpdateEvent(
+                            task_id=context.task_id,
+                            status=TaskStatus(
+                                state=TaskState.failed,
+                                timestamp=datetime.now(timezone.utc).isoformat(),
+                                message=Message(
+                                    message_id=str(uuid.uuid4()),
+                                    role=Role.agent,
+                                    parts=[Part(TextPart(text=str(e)))],
+                                ),
                             ),
-                        ),
-                        context_id=context.context_id,
-                        final=True,
+                            context_id=context.context_id,
+                            final=True,
+                        )
                     )
-                )
-                return
+                    return
+
+                # Record completion metrics on the span
+                final_text = "".join(accumulated_text) or "No response was generated."
+                record_completion(span, new_session_id, msg_index, len(final_text))
 
             # Persist session mapping for next turn
             if new_session_id and context_id:
                 self.session_store.set(context_id, new_session_id)
-
-            # Emit final artifact and completed status
-            final_text = "".join(accumulated_text) or "No response was generated."
             await event_queue.enqueue_event(
                 TaskArtifactUpdateEvent(
                     task_id=context.task_id,

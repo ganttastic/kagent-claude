@@ -262,7 +262,6 @@ curl -X POST http://localhost:8080/ \
 - **No cancellation** — `cancel()` raises `NotImplementedError` (Claude Agent SDK has no cancellation API)
 - **In-memory sessions** — Session store resets on pod restart
 - **No push notifications** — `tasks/pushNotificationConfig` not supported
-- **No OpenTelemetry spans** — Tracing infrastructure is wired but custom spans are not yet emitted
 
 ## Related
 
