@@ -238,17 +238,15 @@ echo $GITHUB_TOKEN | docker login ghcr.io -u ganttastic --password-stdin
 
 ### Deploy to Kubernetes
 
-1. **Set your API key** in `deploy/k8s/deployment.yaml` (or use your preferred secrets management):
+1. **Seal your API key** and update `deploy/k8s/deployment.yaml`:
 
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: anthropic-credentials
-  namespace: kagent
-type: Opaque
-stringData:
-  api-key: "sk-ant-..."
+```bash
+# Create the sealed secret from your API key
+echo -n "sk-ant-..." | kubectl create secret generic anthropic-credentials \
+  --namespace=kagent --from-file=api-key=/dev/stdin --dry-run=client -o yaml \
+  | kubeseal --format yaml > /tmp/sealed.yaml
+
+# Copy the encryptedData.api-key value into deploy/k8s/deployment.yaml
 ```
 
 2. **Apply the manifests:**
