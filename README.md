@@ -131,9 +131,90 @@ python/packages/kagent-claude/src/kagent/claude/
 |---|---|
 | Start of query | `TaskStatusUpdateEvent(state=working)` |
 | `SystemMessage(subtype="init")` | Session ID captured for future turns |
+| `can_use_tool` callback fires | `TaskStatusUpdateEvent(state=input_required)` with approval DataParts |
+| User approves/denies (next message) | Resolves pending approval, query continues |
 | `ResultMessage.result` | `TaskArtifactUpdateEvent` with text |
 | Iterator exhausted | `TaskStatusUpdateEvent(state=completed, final=True)` |
 | Exception raised | `TaskStatusUpdateEvent(state=failed, final=True)` |
+
+## Human-in-the-Loop (HITL)
+
+Enable tool approval gates so users can approve or deny tool usage from the kagent dashboard:
+
+```python
+app = KAgentApp(
+    options=ClaudeAgentOptions(
+        # Don't pre-approve dangerous tools — let HITL handle them
+        allowed_tools=["Read", "Glob", "Grep"],
+    ),
+    agent_card=agent_card,
+    config=config,
+    enable_hitl=True,  # Enable HITL
+)
+```
+
+### How it works
+
+When `enable_hitl=True`, tools **not** listed in `allowed_tools` trigger the approval flow:
+
+```
+1. User: "Delete all temp files"
+2. Claude decides to use Bash("rm -rf /tmp/data/*")
+3. Bash is not in allowed_tools → can_use_tool callback fires
+4. Executor emits TaskStatusUpdateEvent(state=input_required)
+   with DataPart containing tool name, args, and confirmation ID
+5. kagent dashboard renders an approval card
+6. User clicks Approve or Deny
+7. kagent sends follow-up message with decision
+8. Executor resolves the pending approval
+9. Claude continues (or adjusts if denied)
+```
+
+### HITL round-trip protocol
+
+**Approval request** (emitted by executor as DataPart):
+```json
+{
+  "name": "adk_request_confirmation",
+  "id": "<confirmation_uuid>",
+  "args": {
+    "originalFunctionCall": {
+      "name": "Bash",
+      "args": {"command": "rm -rf /tmp/data/*"},
+      "id": "<tool_use_id>"
+    },
+    "toolConfirmation": {
+      "hint": "Tool 'Bash' requires approval before execution.",
+      "confirmed": false
+    }
+  }
+}
+```
+
+**User response** (sent as DataPart in follow-up message):
+```json
+{"decision_type": "approve"}
+```
+or
+```json
+{"decision_type": "reject", "rejection_reason": "Too dangerous"}
+```
+or batch:
+```json
+{
+  "decision_type": "batch",
+  "decisions": {"<tool_use_id>": "approve", "<tool_use_id_2>": "reject"},
+  "rejection_reasons": {"<tool_use_id_2>": "Not authorized"}
+}
+```
+
+### Multiple approvals
+
+Claude may request multiple tools in sequence. Each triggers a separate `input_required` pause. The executor handles this by keeping the Claude query alive in a background task while waiting for each approval.
+
+### Without HITL
+
+When `enable_hitl=False` (default), the executor uses the simpler direct-streaming path. Tools listed in `allowed_tools` are auto-approved by the Claude SDK. Tools not listed will be denied by the SDK's default permission mode unless you set `permission_mode="bypassPermissions"` on your options.
 
 ## Deployment
 
@@ -258,9 +339,9 @@ curl -X POST http://localhost:8080/ \
 
 ## Limitations (v0.1)
 
-- **No HITL** — Human-in-the-loop tool approval is not yet implemented
 - **No cancellation** — `cancel()` raises `NotImplementedError` (Claude Agent SDK has no cancellation API)
 - **In-memory sessions** — Session store resets on pod restart
+- **In-memory HITL state** — Pending approvals are lost on pod restart
 - **No push notifications** — `tasks/pushNotificationConfig` not supported
 
 ## Related

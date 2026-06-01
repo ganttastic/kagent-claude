@@ -56,11 +56,13 @@ class KAgentApp:
         agent_card: AgentCard,
         config: KAgentConfig,
         tracing: bool = True,
+        enable_hitl: bool = False,
     ):
         self._options = options
         self.agent_card = AgentCard.model_validate(agent_card)
         self.config = config
         self._enable_tracing = tracing
+        self._enable_hitl = enable_hitl
         self._session_store = ClaudeSessionStore()
 
     def build(self) -> FastAPI:
@@ -71,6 +73,7 @@ class KAgentApp:
             options=self._options,
             session_store=self._session_store,
             app_name=self.config.app_name,
+            enable_hitl=self._enable_hitl,
         )
 
         task_store = KAgentTaskStore(http_client)

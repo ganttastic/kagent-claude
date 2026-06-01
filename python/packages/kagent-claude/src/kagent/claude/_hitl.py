@@ -1,0 +1,247 @@
+"""
+HITL (Human-in-the-Loop) bridge for the Claude Agent SDK.
+
+Bridges the Claude Agent SDK's synchronous `can_use_tool` callback to kagent's
+async A2A input_required/resume cycle.
+
+Flow:
+1. Claude wants to use a tool → `can_use_tool` callback fires
+2. Bridge creates an asyncio.Future and emits TaskStatusUpdateEvent(input_required)
+3. The executor's execute() returns, leaving the query paused
+4. User responds via kagent dashboard → next execute() call on same task
+5. Bridge resolves the Future with the user's decision
+6. `can_use_tool` returns PermissionResultAllow or PermissionResultDeny
+7. Claude continues execution
+"""
+
+import asyncio
+import logging
+import uuid
+from dataclasses import dataclass, field
+
+from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
+
+logger = logging.getLogger(__name__)
+
+
+# Decision types matching kagent's HITL protocol
+DECISION_APPROVE = "approve"
+DECISION_REJECT = "reject"
+DECISION_BATCH = "batch"
+
+
+@dataclass
+class PendingApproval:
+    """A tool approval request waiting for user decision."""
+
+    confirmation_id: str
+    tool_name: str
+    tool_input: dict
+    tool_use_id: str | None = None
+    future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
+
+
+@dataclass
+class ApprovalDecision:
+    """User's decision on a pending approval."""
+
+    approved: bool
+    updated_input: dict | None = None
+    rejection_reason: str | None = None
+
+
+class HitlBridge:
+    """
+    Manages pending tool approval requests between the Claude Agent SDK
+    and kagent's A2A HITL protocol.
+
+    Each context_id can have multiple pending approvals (batch).
+    """
+
+    def __init__(self):
+        # context_id -> list of pending approvals
+        self._pending: dict[str, list[PendingApproval]] = {}
+
+    def has_pending(self, context_id: str) -> bool:
+        """Check if there are unresolved approvals for this context."""
+        return bool(self._pending.get(context_id))
+
+    def get_pending(self, context_id: str) -> list[PendingApproval]:
+        """Get all pending approvals for a context."""
+        return self._pending.get(context_id, [])
+
+    def create_approval(
+        self,
+        context_id: str,
+        tool_name: str,
+        tool_input: dict,
+        tool_use_id: str | None = None,
+    ) -> PendingApproval:
+        """
+        Create a new pending approval for a tool use request.
+        Returns the PendingApproval whose future will be resolved when
+        the user responds.
+        """
+        approval = PendingApproval(
+            confirmation_id=str(uuid.uuid4()),
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_use_id=tool_use_id,
+        )
+
+        if context_id not in self._pending:
+            self._pending[context_id] = []
+        self._pending[context_id].append(approval)
+
+        logger.debug(
+            f"Created pending approval {approval.confirmation_id} "
+            f"for tool {tool_name} in context {context_id}"
+        )
+        return approval
+
+    def resolve_all(self, context_id: str, decision: ApprovalDecision) -> None:
+        """Resolve all pending approvals for a context with the same decision."""
+        pending = self._pending.pop(context_id, [])
+        for approval in pending:
+            if not approval.future.done():
+                approval.future.set_result(decision)
+
+    def resolve_batch(
+        self,
+        context_id: str,
+        decisions: dict[str, str],
+        rejection_reasons: dict[str, str] | None = None,
+    ) -> None:
+        """
+        Resolve pending approvals individually (batch mode).
+        decisions maps confirmation_id or tool_use_id -> "approve"/"reject"
+        """
+        pending = self._pending.pop(context_id, [])
+        rejection_reasons = rejection_reasons or {}
+
+        for approval in pending:
+            if approval.future.done():
+                continue
+
+            # Match by confirmation_id or tool_use_id
+            decision_str = (
+                decisions.get(approval.confirmation_id)
+                or decisions.get(approval.tool_use_id or "")
+            )
+
+            if decision_str == DECISION_APPROVE:
+                approval.future.set_result(
+                    ApprovalDecision(approved=True, updated_input=approval.tool_input)
+                )
+            else:
+                reason = (
+                    rejection_reasons.get(approval.confirmation_id)
+                    or rejection_reasons.get(approval.tool_use_id or "")
+                    or "User rejected this action"
+                )
+                approval.future.set_result(
+                    ApprovalDecision(approved=False, rejection_reason=reason)
+                )
+
+    def cancel_all(self, context_id: str) -> None:
+        """Cancel all pending approvals (e.g., on task failure or timeout)."""
+        pending = self._pending.pop(context_id, [])
+        for approval in pending:
+            if not approval.future.done():
+                approval.future.cancel()
+
+
+def build_confirmation_data_part(approval: PendingApproval) -> dict:
+    """
+    Build the A2A DataPart data dict for an approval request,
+    matching kagent's adk_request_confirmation format.
+    """
+    return {
+        "name": "adk_request_confirmation",
+        "id": approval.confirmation_id,
+        "args": {
+            "originalFunctionCall": {
+                "name": approval.tool_name,
+                "args": approval.tool_input,
+                "id": approval.tool_use_id or approval.confirmation_id,
+            },
+            "toolConfirmation": {
+                "hint": f"Tool '{approval.tool_name}' requires approval before execution.",
+                "confirmed": False,
+                "payload": None,
+            },
+        },
+    }
+
+
+def build_confirmation_metadata() -> dict:
+    """Build the A2A DataPart metadata for an approval request."""
+    return {
+        "kagent_type": "function_call",
+        "kagent_is_long_running": True,
+    }
+
+
+def extract_decision_from_message(message) -> tuple[str, dict[str, str], dict[str, str]] | None:
+    """
+    Extract HITL decision from an A2A message.
+    Returns (decision_type, decisions_dict, rejection_reasons) or None.
+    """
+    if not message or not hasattr(message, "parts"):
+        return None
+
+    for part in message.parts:
+        data = None
+        if hasattr(part, "data"):
+            data = part.data
+        elif hasattr(part, "root") and hasattr(part.root, "data"):
+            data = part.root.data
+
+        if not isinstance(data, dict):
+            continue
+
+        decision_type = data.get("decision_type")
+        if decision_type:
+            decisions = data.get("decisions", {})
+            rejection_reasons = data.get("rejection_reasons", {})
+            rejection_reason = data.get("rejection_reason")
+            # Uniform rejection reason goes into the reasons dict
+            if rejection_reason and not rejection_reasons:
+                rejection_reasons = {"__all__": rejection_reason}
+            return (decision_type, decisions, rejection_reasons)
+
+    return None
+
+
+async def make_can_use_tool_callback(bridge: HitlBridge, context_id: str):
+    """
+    Factory that creates a `can_use_tool` callback wired to the HITL bridge.
+
+    The returned callback pauses Claude's execution by awaiting a Future,
+    which is resolved when the user responds via the A2A protocol.
+    """
+
+    async def can_use_tool(
+        tool_name: str, input_data: dict, context
+    ) -> PermissionResultAllow | PermissionResultDeny:
+        # Create a pending approval and wait for the user's decision
+        approval = bridge.create_approval(
+            context_id=context_id,
+            tool_name=tool_name,
+            tool_input=input_data,
+            tool_use_id=getattr(context, "tool_use_id", None),
+        )
+
+        # This await pauses Claude's execution until resolve is called
+        decision: ApprovalDecision = await approval.future
+
+        if decision.approved:
+            return PermissionResultAllow(
+                updated_input=decision.updated_input or input_data
+            )
+        else:
+            return PermissionResultDeny(
+                message=decision.rejection_reason or "User denied this action"
+            )
+
+    return can_use_tool
