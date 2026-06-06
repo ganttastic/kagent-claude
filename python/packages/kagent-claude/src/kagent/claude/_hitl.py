@@ -20,14 +20,22 @@ import uuid
 from dataclasses import dataclass, field
 
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
+from kagent.core.a2a import (
+    A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY,
+    A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
+    A2A_DATA_PART_METADATA_TYPE_KEY,
+    KAGENT_HITL_DECISION_TYPE_APPROVE,
+    KAGENT_HITL_DECISION_TYPE_BATCH,
+    KAGENT_HITL_DECISION_TYPE_KEY,
+    KAGENT_HITL_DECISION_TYPE_REJECT,
+    KAGENT_HITL_DECISIONS_KEY,
+    KAGENT_HITL_REJECTION_REASONS_KEY,
+    extract_batch_decisions_from_message,
+    extract_decision_from_message,
+    extract_rejection_reasons_from_message,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# Decision types matching kagent's HITL protocol
-DECISION_APPROVE = "approve"
-DECISION_REJECT = "reject"
-DECISION_BATCH = "batch"
 
 
 @dataclass
@@ -38,7 +46,12 @@ class PendingApproval:
     tool_name: str
     tool_input: dict
     tool_use_id: str | None = None
-    future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
+    future: asyncio.Future = field(default=None, init=False)
+
+    def __post_init__(self):
+        # Create the future lazily — requires a running event loop
+        loop = asyncio.get_running_loop()
+        self.future = loop.create_future()
 
 
 @dataclass
@@ -129,7 +142,7 @@ class HitlBridge:
                 or decisions.get(approval.tool_use_id or "")
             )
 
-            if decision_str == DECISION_APPROVE:
+            if decision_str == KAGENT_HITL_DECISION_TYPE_APPROVE:
                 approval.future.set_result(
                     ApprovalDecision(approved=True, updated_input=approval.tool_input)
                 )
@@ -177,40 +190,70 @@ def build_confirmation_data_part(approval: PendingApproval) -> dict:
 def build_confirmation_metadata() -> dict:
     """Build the A2A DataPart metadata for an approval request."""
     return {
-        "kagent_type": "function_call",
-        "kagent_is_long_running": True,
+        A2A_DATA_PART_METADATA_TYPE_KEY: A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
+        A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY: True,
     }
 
 
-def extract_decision_from_message(message) -> tuple[str, dict[str, str], dict[str, str]] | None:
+def extract_hitl_decision_from_message(message) -> tuple[str, dict[str, str], dict[str, str]] | None:
     """
-    Extract HITL decision from an A2A message.
+    Extract HITL decision from an A2A message using kagent-core utilities.
     Returns (decision_type, decisions_dict, rejection_reasons) or None.
+
+    Supports both real A2A Message objects and raw message-like objects
+    with .parts containing DataParts or dicts.
     """
-    if not message or not hasattr(message, "parts"):
+    if not message:
         return None
 
-    for part in message.parts:
-        data = None
-        if hasattr(part, "data"):
-            data = part.data
-        elif hasattr(part, "root") and hasattr(part.root, "data"):
-            data = part.root.data
+    # Try kagent-core's extract first (works with real A2A Message objects)
+    decision_type = extract_decision_from_message(message)
 
-        if not isinstance(data, dict):
-            continue
+    # Fallback: check raw .data on parts (for cases where parts aren't wrapped in RootModel)
+    if not decision_type and hasattr(message, "parts") and message.parts:
+        for part in message.parts:
+            data = None
+            if hasattr(part, "data") and isinstance(getattr(part, "data", None), dict):
+                data = part.data
+            elif hasattr(part, "root") and hasattr(part.root, "data") and isinstance(part.root.data, dict):
+                data = part.root.data
 
-        decision_type = data.get("decision_type")
-        if decision_type:
-            decisions = data.get("decisions", {})
-            rejection_reasons = data.get("rejection_reasons", {})
-            rejection_reason = data.get("rejection_reason")
-            # Uniform rejection reason goes into the reasons dict
-            if rejection_reason and not rejection_reasons:
-                rejection_reasons = {"__all__": rejection_reason}
-            return (decision_type, decisions, rejection_reasons)
+            if data and KAGENT_HITL_DECISION_TYPE_KEY in data:
+                decision_type = data[KAGENT_HITL_DECISION_TYPE_KEY]
+                break
 
-    return None
+    if not decision_type:
+        return None
+
+    # Extract batch decisions and rejection reasons
+    decisions = extract_batch_decisions_from_message(message) or {}
+    rejection_reasons = extract_rejection_reasons_from_message(message) or {}
+
+    # Fallback: extract from raw parts if core utilities didn't find them
+    if not decisions or not rejection_reasons:
+        if hasattr(message, "parts") and message.parts:
+            for part in message.parts:
+                data = None
+                if hasattr(part, "data") and isinstance(getattr(part, "data", None), dict):
+                    data = part.data
+                elif hasattr(part, "root") and hasattr(part.root, "data") and isinstance(part.root.data, dict):
+                    data = part.root.data
+
+                if not isinstance(data, dict):
+                    continue
+
+                if not decisions and KAGENT_HITL_DECISIONS_KEY in data:
+                    decisions = data[KAGENT_HITL_DECISIONS_KEY]
+                if not rejection_reasons and KAGENT_HITL_REJECTION_REASONS_KEY in data:
+                    rejection_reasons = data[KAGENT_HITL_REJECTION_REASONS_KEY]
+
+                # Single rejection_reason field
+                if not rejection_reasons:
+                    reason = data.get("rejection_reason")
+                    if reason:
+                        rejection_reasons = {"__all__": reason}
+
+    return (decision_type, decisions, rejection_reasons)
 
 
 async def make_can_use_tool_callback(bridge: HitlBridge, context_id: str):

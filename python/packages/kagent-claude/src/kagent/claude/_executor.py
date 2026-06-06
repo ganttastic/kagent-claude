@@ -28,20 +28,22 @@ from a2a.types import (
 )
 from claude_agent_sdk import ClaudeAgentOptions, SystemMessage, query
 from claude_agent_sdk.types import HookMatcher
+from kagent.core.a2a import (
+    KAGENT_HITL_DECISION_TYPE_APPROVE,
+    KAGENT_HITL_DECISION_TYPE_BATCH,
+    KAGENT_HITL_DECISION_TYPE_REJECT,
+)
 from kagent.core.tracing._span_processor import (
     clear_kagent_span_attributes,
     set_kagent_span_attributes,
 )
 
 from ._hitl import (
-    DECISION_APPROVE,
-    DECISION_BATCH,
-    DECISION_REJECT,
     ApprovalDecision,
     HitlBridge,
     build_confirmation_data_part,
     build_confirmation_metadata,
-    extract_decision_from_message,
+    extract_hitl_decision_from_message,
     make_can_use_tool_callback,
 )
 from ._session_store import ClaudeSessionStore
@@ -318,8 +320,8 @@ class ClaudeAgentExecutor(AgentExecutor):
             return False
         if not self._hitl_bridge.has_pending(context_id):
             return False
-        # Check if the message contains a decision
-        return extract_decision_from_message(context.message) is not None
+        # Check if the message contains a decision (using kagent-core utilities)
+        return extract_hitl_decision_from_message(context.message) is not None
 
     async def _handle_hitl_resume(
         self,
@@ -328,21 +330,21 @@ class ClaudeAgentExecutor(AgentExecutor):
     ) -> None:
         """Handle a HITL resume: resolve pending approvals and wait for completion."""
         context_id = context.context_id
-        result = extract_decision_from_message(context.message)
+        result = extract_hitl_decision_from_message(context.message)
         if not result:
             await self._emit_failed(context, event_queue, "Invalid HITL response message")
             return
 
         decision_type, decisions, rejection_reasons = result
 
-        # Resolve the pending approvals
-        if decision_type == DECISION_BATCH:
+        # Resolve the pending approvals using kagent-core constants
+        if decision_type == KAGENT_HITL_DECISION_TYPE_BATCH:
             self._hitl_bridge.resolve_batch(context_id, decisions, rejection_reasons)
-        elif decision_type == DECISION_APPROVE:
+        elif decision_type == KAGENT_HITL_DECISION_TYPE_APPROVE:
             self._hitl_bridge.resolve_all(
                 context_id, ApprovalDecision(approved=True)
             )
-        elif decision_type == DECISION_REJECT:
+        elif decision_type == KAGENT_HITL_DECISION_TYPE_REJECT:
             reason = rejection_reasons.get("__all__", "User rejected this action")
             self._hitl_bridge.resolve_all(
                 context_id, ApprovalDecision(approved=False, rejection_reason=reason)

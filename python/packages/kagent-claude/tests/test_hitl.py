@@ -7,31 +7,42 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kagent.claude._hitl import (
-    DECISION_APPROVE,
-    DECISION_BATCH,
-    DECISION_REJECT,
     ApprovalDecision,
     HitlBridge,
     build_confirmation_data_part,
     build_confirmation_metadata,
-    extract_decision_from_message,
+    extract_hitl_decision_from_message,
     make_can_use_tool_callback,
+)
+from kagent.core.a2a import (
+    A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY,
+    A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
+    A2A_DATA_PART_METADATA_TYPE_KEY,
+    KAGENT_HITL_DECISION_TYPE_APPROVE,
+    KAGENT_HITL_DECISION_TYPE_BATCH,
+    KAGENT_HITL_DECISION_TYPE_KEY,
+    KAGENT_HITL_DECISION_TYPE_REJECT,
+    KAGENT_HITL_DECISIONS_KEY,
+    KAGENT_HITL_REJECTION_REASONS_KEY,
 )
 
 
 class TestHitlBridge:
-    def test_has_pending_false_initially(self):
+    @pytest.mark.asyncio
+    async def test_has_pending_false_initially(self):
         bridge = HitlBridge()
         assert bridge.has_pending("ctx-1") is False
 
-    def test_create_approval_makes_pending(self):
+    @pytest.mark.asyncio
+    async def test_create_approval_makes_pending(self):
         bridge = HitlBridge()
         approval = bridge.create_approval("ctx-1", "Bash", {"command": "rm -rf /"})
         assert bridge.has_pending("ctx-1") is True
         assert approval.tool_name == "Bash"
         assert approval.tool_input == {"command": "rm -rf /"}
 
-    def test_resolve_all_approve(self):
+    @pytest.mark.asyncio
+    async def test_resolve_all_approve(self):
         bridge = HitlBridge()
         approval = bridge.create_approval("ctx-1", "Bash", {"command": "ls"})
 
@@ -42,7 +53,8 @@ class TestHitlBridge:
         assert approval.future.result().approved is True
         assert bridge.has_pending("ctx-1") is False
 
-    def test_resolve_all_reject(self):
+    @pytest.mark.asyncio
+    async def test_resolve_all_reject(self):
         bridge = HitlBridge()
         approval = bridge.create_approval("ctx-1", "Write", {"file_path": "/etc/passwd"})
 
@@ -52,7 +64,8 @@ class TestHitlBridge:
         assert approval.future.result().approved is False
         assert approval.future.result().rejection_reason == "Dangerous path"
 
-    def test_resolve_batch(self):
+    @pytest.mark.asyncio
+    async def test_resolve_batch(self):
         bridge = HitlBridge()
         a1 = bridge.create_approval("ctx-1", "Bash", {"command": "ls"}, tool_use_id="tool-1")
         a2 = bridge.create_approval("ctx-1", "Write", {"file_path": "x"}, tool_use_id="tool-2")
@@ -67,14 +80,16 @@ class TestHitlBridge:
         assert a2.future.result().approved is False
         assert a2.future.result().rejection_reason == "Not allowed"
 
-    def test_cancel_all(self):
+    @pytest.mark.asyncio
+    async def test_cancel_all(self):
         bridge = HitlBridge()
         approval = bridge.create_approval("ctx-1", "Bash", {"command": "ls"})
         bridge.cancel_all("ctx-1")
         assert approval.future.cancelled()
         assert bridge.has_pending("ctx-1") is False
 
-    def test_multiple_contexts_independent(self):
+    @pytest.mark.asyncio
+    async def test_multiple_contexts_independent(self):
         bridge = HitlBridge()
         bridge.create_approval("ctx-1", "Bash", {"command": "ls"})
         bridge.create_approval("ctx-2", "Write", {"file_path": "x"})
@@ -85,7 +100,8 @@ class TestHitlBridge:
 
 
 class TestBuildConfirmationParts:
-    def test_data_part_structure(self):
+    @pytest.mark.asyncio
+    async def test_data_part_structure(self):
         from kagent.claude._hitl import PendingApproval
 
         approval = PendingApproval(
@@ -105,50 +121,53 @@ class TestBuildConfirmationParts:
 
     def test_metadata_structure(self):
         meta = build_confirmation_metadata()
-        assert meta["kagent_type"] == "function_call"
-        assert meta["kagent_is_long_running"] is True
+        assert meta[A2A_DATA_PART_METADATA_TYPE_KEY] == A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL
+        assert meta[A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY] is True
 
 
 class TestExtractDecision:
     def test_approve_decision(self):
         part = MagicMock()
-        part.data = {"decision_type": "approve"}
+        part.data = {KAGENT_HITL_DECISION_TYPE_KEY: KAGENT_HITL_DECISION_TYPE_APPROVE}
         part.root = None
 
         message = MagicMock()
         message.parts = [part]
 
-        result = extract_decision_from_message(message)
+        result = extract_hitl_decision_from_message(message)
         assert result is not None
         decision_type, decisions, reasons = result
-        assert decision_type == "approve"
+        assert decision_type == KAGENT_HITL_DECISION_TYPE_APPROVE
 
     def test_reject_with_reason(self):
         part = MagicMock()
-        part.data = {"decision_type": "reject", "rejection_reason": "Too dangerous"}
-
-        message = MagicMock()
-        message.parts = [part]
-
-        result = extract_decision_from_message(message)
-        decision_type, decisions, reasons = result
-        assert decision_type == "reject"
-        assert reasons["__all__"] == "Too dangerous"
-
-    def test_batch_decision(self):
-        part = MagicMock()
         part.data = {
-            "decision_type": "batch",
-            "decisions": {"tool-1": "approve", "tool-2": "reject"},
-            "rejection_reasons": {"tool-2": "Nope"},
+            KAGENT_HITL_DECISION_TYPE_KEY: KAGENT_HITL_DECISION_TYPE_REJECT,
+            "rejection_reason": "Too dangerous",
         }
 
         message = MagicMock()
         message.parts = [part]
 
-        result = extract_decision_from_message(message)
+        result = extract_hitl_decision_from_message(message)
         decision_type, decisions, reasons = result
-        assert decision_type == "batch"
+        assert decision_type == KAGENT_HITL_DECISION_TYPE_REJECT
+        assert reasons["__all__"] == "Too dangerous"
+
+    def test_batch_decision(self):
+        part = MagicMock()
+        part.data = {
+            KAGENT_HITL_DECISION_TYPE_KEY: KAGENT_HITL_DECISION_TYPE_BATCH,
+            KAGENT_HITL_DECISIONS_KEY: {"tool-1": "approve", "tool-2": "reject"},
+            KAGENT_HITL_REJECTION_REASONS_KEY: {"tool-2": "Nope"},
+        }
+
+        message = MagicMock()
+        message.parts = [part]
+
+        result = extract_hitl_decision_from_message(message)
+        decision_type, decisions, reasons = result
+        assert decision_type == KAGENT_HITL_DECISION_TYPE_BATCH
         assert decisions["tool-1"] == "approve"
         assert reasons["tool-2"] == "Nope"
 
@@ -159,10 +178,10 @@ class TestExtractDecision:
         message = MagicMock()
         message.parts = [part]
 
-        assert extract_decision_from_message(message) is None
+        assert extract_hitl_decision_from_message(message) is None
 
     def test_none_message(self):
-        assert extract_decision_from_message(None) is None
+        assert extract_hitl_decision_from_message(None) is None
 
 
 @pytest.mark.asyncio
