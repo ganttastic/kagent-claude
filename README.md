@@ -46,7 +46,7 @@ app = KAgentApp(
     agent_card=AgentCard(
         name="my-claude-agent",
         description="A Claude-powered kagent agent",
-        url="http://my-claude-agent:8080/",
+        url="http://localhost:8080/",
         version="1.0.0",
         capabilities=AgentCapabilities(streaming=True),
         default_input_modes=["text"],
@@ -60,11 +60,7 @@ app = KAgentApp(
             )
         ],
     ),
-    config=KAgentConfig(
-        url="http://kagent-controller:8083",
-        name="my-claude-agent",
-        namespace="kagent",
-    ),
+    config=KAgentConfig(),  # reads KAGENT_URL, KAGENT_NAME, KAGENT_NAMESPACE from env
 )
 
 if __name__ == "__main__":
@@ -78,9 +74,9 @@ if __name__ == "__main__":
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Claude API key from [console.anthropic.com](https://console.anthropic.com) |
-| `KAGENT_URL` | Yes | kagent controller URL (or pass via `KAgentConfig(url=...)`) |
-| `KAGENT_NAME` | Yes | Agent name matching the Agent CRD (or pass via config) |
-| `KAGENT_NAMESPACE` | Yes | Kubernetes namespace (or pass via config) |
+| `KAGENT_URL` | Auto-injected | kagent controller URL (injected by kagent for BYO agents) |
+| `KAGENT_NAME` | Auto-injected | Agent name matching the Agent CRD (injected by kagent) |
+| `KAGENT_NAMESPACE` | Auto-injected | Kubernetes namespace (injected by kagent) |
 
 ### ClaudeAgentOptions
 
@@ -238,40 +234,33 @@ echo $GITHUB_TOKEN | docker login ghcr.io -u ganttastic --password-stdin
 
 ### Deploy to Kubernetes
 
-1. **Seal your API key** and update `deploy/k8s/deployment.yaml`:
+1. **Create the API key secret:**
 
 ```bash
-# Create the sealed secret from your API key
-echo -n "sk-ant-..." | kubectl create secret generic anthropic-credentials \
-  --namespace=kagent --from-file=api-key=/dev/stdin --dry-run=client -o yaml \
-  | kubeseal --format yaml > /tmp/sealed.yaml
-
-# Copy the encryptedData.api-key value into deploy/k8s/deployment.yaml
+kubectl create secret generic kagent-anthropic \
+  --namespace=kagent \
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-2. **Apply the manifests:**
+2. **Apply the Agent CRD:**
 
 ```bash
 kubectl apply -f deploy/k8s/deployment.yaml
 ```
 
-This creates:
-- `Secret` — Anthropic API key
-- `Deployment` — The agent container with health probes
-- `Service` — ClusterIP service on port 8080
-- `Agent` CRD — Registers the agent with kagent as a BYO type
+The kagent controller manages the Deployment and Service for BYO agents. You only need to apply the Agent CRD — kagent handles the rest.
 
 3. **Verify:**
 
 ```bash
-# Check the pod is running
-kubectl -n kagent get pods -l app=claude-agent
+# Check the agent is registered
+kubectl -n kagent get agents
+
+# Check the pod is running (created by kagent controller)
+kubectl -n kagent get pods -l kagent.dev/agent=claude-agent
 
 # Check logs
-kubectl -n kagent logs -l app=claude-agent
-
-# Verify agent registration
-kubectl -n kagent get agents
+kubectl -n kagent logs -l kagent.dev/agent=claude-agent
 ```
 
 ### Kubernetes Manifest Overview
@@ -283,7 +272,7 @@ deploy/
 ├── app/
 │   └── main.py         # The deployed agent application
 └── k8s/
-    └── deployment.yaml # Secret, Deployment, Service, Agent CRD
+    └── deployment.yaml # Agent CRD (kagent manages Deployment + Service)
 ```
 
 ## Session Continuity
@@ -335,7 +324,7 @@ curl -X POST http://localhost:8080/ \
   }'
 ```
 
-## Limitations (v0.1)
+## Limitations (v0.2)
 
 - **No cancellation** — `cancel()` raises `NotImplementedError` (Claude Agent SDK has no cancellation API)
 - **In-memory sessions** — Session store resets on pod restart

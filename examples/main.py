@@ -33,8 +33,8 @@ app = KAgentApp(
     agent_card=AgentCard(
         name="claude-example-agent",
         description="Example Claude-powered coding agent running on kagent",
-        url="http://claude-example-agent.kagent.svc.cluster.local:8080/",
-        version="0.1.0",
+        url="http://localhost:8080/",
+        version="0.2.0",
         capabilities=AgentCapabilities(streaming=True),
         default_input_modes=["text"],
         default_output_modes=["text"],

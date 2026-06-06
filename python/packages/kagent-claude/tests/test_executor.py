@@ -4,6 +4,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from a2a.types import Message, Role, TextPart
 
 from kagent.claude._executor import ClaudeAgentExecutor
 from kagent.claude._session_store import ClaudeSessionStore
@@ -38,8 +39,12 @@ def request_context():
     ctx.task_id = str(uuid.uuid4())
     ctx.context_id = "test-context-id"
     ctx.current_task = None
-    ctx.message = MagicMock()
-    ctx.message.parts = []
+    # Use a real A2A Message so Pydantic validation passes
+    ctx.message = Message(
+        message_id="msg-test-001",
+        role=Role.user,
+        parts=[TextPart(text="Hello Claude")],
+    )
     ctx.get_user_input = MagicMock(return_value="Hello Claude")
     ctx.call_context = None
     return ctx

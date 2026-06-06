@@ -12,8 +12,8 @@ app = KAgentApp(
     agent_card=AgentCard(
         name="claude-agent",
         description="Claude-powered coding and research agent",
-        url="http://claude-agent.kagent.svc.cluster.local:8080/",
-        version="0.1.0",
+        url="http://localhost:8080/",
+        version="0.2.0",
         capabilities=AgentCapabilities(streaming=True),
         default_input_modes=["text"],
         default_output_modes=["text"],
