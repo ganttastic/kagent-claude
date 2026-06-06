@@ -12,4 +12,4 @@ __all__ = [
     "ApprovalDecision",
     "trace_query",
 ]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

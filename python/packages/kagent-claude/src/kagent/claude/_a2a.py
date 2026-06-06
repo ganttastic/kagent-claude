@@ -10,7 +10,7 @@ from a2a.types import AgentCard
 from claude_agent_sdk import ClaudeAgentOptions
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
-from kagent.core import KAgentConfig, configure_tracing
+from kagent.core import KAgentConfig, configure_logging, configure_tracing
 from kagent.core.a2a import (
     KAgentRequestContextBuilder,
     KAgentTaskStore,
@@ -44,7 +44,7 @@ class KAgentApp:
         app = KAgentApp(
             options=ClaudeAgentOptions(allowed_tools=["Bash", "Read"]),
             agent_card=AgentCard(...),
-            config=KAgentConfig(url="http://kagent-controller:8083", name="my-agent", namespace="kagent"),
+            config=KAgentConfig(),  # reads from KAGENT_URL, KAGENT_NAME, KAGENT_NAMESPACE env vars
         )
         app.run()
     """
@@ -54,13 +54,13 @@ class KAgentApp:
         *,
         options: ClaudeAgentOptions,
         agent_card: AgentCard,
-        config: KAgentConfig,
+        config: KAgentConfig = None,
         tracing: bool = True,
         enable_hitl: bool = False,
     ):
         self._options = options
         self.agent_card = AgentCard.model_validate(agent_card)
-        self.config = config
+        self.config = config or KAgentConfig()
         self._enable_tracing = tracing
         self._enable_hitl = enable_hitl
         self._session_store = ClaudeSessionStore()
@@ -97,6 +97,8 @@ class KAgentApp:
             description=f"Claude Agent SDK with KAgent integration: {self.agent_card.description}",
             version=self.agent_card.version,
         )
+
+        configure_logging()
 
         if self._enable_tracing:
             try:
