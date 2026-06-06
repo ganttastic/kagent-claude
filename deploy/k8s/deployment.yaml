@@ -1,84 +1,16 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kagent
-  labels:
-    app.kubernetes.io/part-of: kagent
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: claude-agent
-  namespace: kagent
-  labels:
-    app: claude-agent
-    app.kubernetes.io/name: claude-agent
-    app.kubernetes.io/part-of: kagent
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: claude-agent
-  template:
-    metadata:
-      labels:
-        app: claude-agent
-    spec:
-      containers:
-        - name: claude-agent
-          image: ghcr.io/ganttastic/kagent-claude:latest
-          ports:
-            - containerPort: 8080
-              name: http
-              protocol: TCP
-          env:
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: kagent-anthropic
-                  key: ANTHROPIC_API_KEY
-            - name: KAGENT_URL
-              value: "http://kagent-controller.kagent.svc.cluster.local:8083"
-            - name: KAGENT_NAME
-              value: "claude-agent"
-            - name: KAGENT_NAMESPACE
-              value: "kagent"
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "500m"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 3
-            periodSeconds: 5
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: claude-agent
-  namespace: kagent
-  labels:
-    app: claude-agent
-spec:
-  selector:
-    app: claude-agent
-  ports:
-    - port: 8080
-      targetPort: http
-      protocol: TCP
-      name: http
-  type: ClusterIP
+# kagent-claude BYO Agent deployment
+#
+# The kagent controller manages the Deployment and Service for BYO agents.
+# You only need to:
+# 1. Ensure the kagent namespace exists (created by kagent install)
+# 2. Create the Secret with your Anthropic API key
+# 3. Apply the Agent CRD below
+#
+# Prerequisites:
+#   kubectl create secret generic kagent-anthropic \
+#     --namespace=kagent \
+#     --from-literal=ANTHROPIC_API_KEY=sk-ant-...
+
 ---
 apiVersion: kagent.dev/v1alpha2
 kind: Agent
@@ -89,4 +21,11 @@ spec:
   description: Claude-powered coding and research agent
   type: BYO
   byo:
-    url: "http://claude-agent.kagent.svc.cluster.local:8080"
+    deployment:
+      image: ghcr.io/ganttastic/kagent-claude:latest
+      env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kagent-anthropic
+              key: ANTHROPIC_API_KEY

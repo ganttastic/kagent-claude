@@ -7,4 +7,11 @@ spec:
   description: Example Claude-powered coding agent via kagent-claude
   type: BYO
   byo:
-    url: "http://claude-example-agent.kagent.svc.cluster.local:8080"
+    deployment:
+      image: ghcr.io/ganttastic/kagent-claude-example:latest
+      env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kagent-anthropic
+              key: ANTHROPIC_API_KEY
