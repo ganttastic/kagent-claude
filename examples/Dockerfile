@@ -1,14 +1,13 @@
 FROM python:3.12-slim
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install kagent-claude from source (not yet published to PyPI)
+# --pre is needed because kagent-core depends on opentelemetry-instrumentation-fastapi
+# which only publishes pre-release versions (0.52b0, 0.63b1, etc.)
+COPY python/packages/kagent-claude/ /app/kagent-claude/
+RUN pip install --no-cache-dir --pre /app/kagent-claude/
 
-COPY main.py .
-
-ENV ANTHROPIC_API_KEY=""
-ENV KAGENT_URL="http://kagent-controller:8083"
-ENV KAGENT_NAME="claude-agent"
-ENV KAGENT_NAMESPACE="kagent"
+# Copy the example app
+COPY examples/main.py .
 
 CMD ["python", "main.py"]

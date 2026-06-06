@@ -31,9 +31,9 @@ app = KAgentApp(
         allowed_tools=["Bash", "Read", "Glob", "Grep"],
     ),
     agent_card=AgentCard(
-        name="claude-agent",
-        description="A Claude-powered coding agent running on kagent",
-        url="http://localhost:8080/",
+        name="claude-example-agent",
+        description="Example Claude-powered coding agent running on kagent",
+        url="http://claude-example-agent.kagent.svc.cluster.local:8080/",
         version="0.1.0",
         capabilities=AgentCapabilities(streaming=True),
         default_input_modes=["text"],

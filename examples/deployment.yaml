@@ -1,32 +1,25 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kagent
-  labels:
-    app.kubernetes.io/part-of: kagent
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: claude-agent
+  name: claude-example-agent
   namespace: kagent
   labels:
-    app: claude-agent
-    app.kubernetes.io/name: claude-agent
+    app: claude-example-agent
+    app.kubernetes.io/name: claude-example-agent
     app.kubernetes.io/part-of: kagent
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: claude-agent
+      app: claude-example-agent
   template:
     metadata:
       labels:
-        app: claude-agent
+        app: claude-example-agent
     spec:
       containers:
-        - name: claude-agent
-          image: ghcr.io/ganttastic/kagent-claude:latest
+        - name: claude-example-agent
+          image: ghcr.io/ganttastic/kagent-claude-example:latest
           ports:
             - containerPort: 8080
               name: http
@@ -40,7 +33,7 @@ spec:
             - name: KAGENT_URL
               value: "http://kagent-controller.kagent.svc.cluster.local:8083"
             - name: KAGENT_NAME
-              value: "claude-agent"
+              value: "claude-example-agent"
             - name: KAGENT_NAMESPACE
               value: "kagent"
           resources:
@@ -54,25 +47,25 @@ spec:
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 3
+            initialDelaySeconds: 5
             periodSeconds: 5
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: claude-agent
+  name: claude-example-agent
   namespace: kagent
   labels:
-    app: claude-agent
+    app: claude-example-agent
 spec:
   selector:
-    app: claude-agent
+    app: claude-example-agent
   ports:
     - port: 8080
       targetPort: http
@@ -83,10 +76,10 @@ spec:
 apiVersion: kagent.dev/v1alpha2
 kind: Agent
 metadata:
-  name: claude-agent
+  name: claude-example-agent
   namespace: kagent
 spec:
-  description: Claude-powered coding and research agent
+  description: Example Claude-powered coding agent via kagent-claude
   type: BYO
   byo:
-    url: "http://claude-agent.kagent.svc.cluster.local:8080"
+    url: "http://claude-example-agent.kagent.svc.cluster.local:8080"
