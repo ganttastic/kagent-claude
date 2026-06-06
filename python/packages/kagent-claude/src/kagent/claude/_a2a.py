@@ -2,6 +2,7 @@
 
 import faulthandler
 import logging
+from contextlib import asynccontextmanager
 
 import httpx
 from a2a.server.apps import A2AStarletteApplication
@@ -17,7 +18,7 @@ from kagent.core.a2a import (
     get_a2a_max_content_length,
 )
 
-from ._executor import ClaudeAgentExecutor
+from ._executor import ClaudeAgentExecutor, ClaudeExecutorConfig
 from ._session_store import ClaudeSessionStore
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ class KAgentApp:
         options: ClaudeAgentOptions,
         agent_card: AgentCard,
         config: KAgentConfig = None,
+        executor_config: ClaudeExecutorConfig | None = None,
         tracing: bool = True,
         enable_hitl: bool = False,
     ):
@@ -62,8 +64,13 @@ class KAgentApp:
         self.agent_card = AgentCard.model_validate(agent_card)
         self.config = config or KAgentConfig()
         self._enable_tracing = tracing
-        self._enable_hitl = enable_hitl
         self._session_store = ClaudeSessionStore()
+
+        # Build executor config from explicit config or legacy kwarg
+        if executor_config:
+            self._executor_config = executor_config
+        else:
+            self._executor_config = ClaudeExecutorConfig(enable_hitl=enable_hitl)
 
     def build(self) -> FastAPI:
         """Construct and return the FastAPI ASGI application."""
@@ -73,7 +80,7 @@ class KAgentApp:
             options=self._options,
             session_store=self._session_store,
             app_name=self.config.app_name,
-            enable_hitl=self._enable_hitl,
+            config=self._executor_config,
         )
 
         task_store = KAgentTaskStore(http_client)
@@ -91,11 +98,22 @@ class KAgentApp:
             max_content_length=max_content_length,
         )
 
+        # Lifespan for graceful shutdown
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            logger.info(f"KAgent Claude starting: {self.config.app_name}")
+            yield
+            # Shutdown: cancel running queries
+            await agent_executor.shutdown()
+            await http_client.aclose()
+            logger.info(f"KAgent Claude stopped: {self.config.app_name}")
+
         faulthandler.enable()
         app = FastAPI(
             title=f"KAgent Claude: {self.config.app_name}",
             description=f"Claude Agent SDK with KAgent integration: {self.agent_card.description}",
             version=self.agent_card.version,
+            lifespan=lifespan,
         )
 
         configure_logging()

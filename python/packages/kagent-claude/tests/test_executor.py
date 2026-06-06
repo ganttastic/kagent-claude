@@ -1,12 +1,13 @@
 """Tests for ClaudeAgentExecutor."""
 
+import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from a2a.types import Message, Role, TextPart
 
-from kagent.claude._executor import ClaudeAgentExecutor
+from kagent.claude._executor import ClaudeAgentExecutor, ClaudeExecutorConfig
 from kagent.claude._session_store import ClaudeSessionStore
 
 
@@ -23,6 +24,7 @@ def executor(session_store):
         options=options,
         session_store=session_store,
         app_name="test-agent",
+        config=ClaudeExecutorConfig(enable_streaming=False),
     )
 
 
@@ -129,7 +131,7 @@ async def test_execute_resumes_with_existing_session(executor, event_queue, requ
 
 @pytest.mark.asyncio
 async def test_execute_handles_exception(executor, event_queue, request_context):
-    """Exception during query() emits a failed status event."""
+    """Exception during query() emits a failed status event with classified error."""
 
     async def _failing_iter():
         raise RuntimeError("Claude SDK error")
@@ -146,6 +148,42 @@ async def test_execute_handles_exception(executor, event_queue, request_context)
     last_event = last_call[0][0]
     assert last_event.final is True
     assert last_event.status.state.value == "failed"
+    # Should have error metadata
+    assert last_event.metadata is not None
+    assert "kagent.claude.error_type" in last_event.metadata
+
+
+@pytest.mark.asyncio
+async def test_execute_handles_timeout(event_queue, request_context, session_store):
+    """Timeout during query() emits a failed status event."""
+    options = MagicMock()
+    options.__dict__ = {"allowed_tools": ["Bash"]}
+    executor = ClaudeAgentExecutor(
+        options=options,
+        session_store=session_store,
+        app_name="test-agent",
+        config=ClaudeExecutorConfig(
+            execution_timeout=0.05,  # 50ms timeout
+            enable_streaming=False,
+        ),
+    )
+
+    async def _slow_iter():
+        await asyncio.sleep(5.0)  # will be interrupted by timeout
+        yield MockResultMessage(result="too late")
+
+    with patch("kagent.claude._executor.query", return_value=_slow_iter()):
+        with patch("kagent.claude._executor.SystemMessage", MockSystemMessage):
+            with patch("kagent.claude._executor.set_kagent_span_attributes", return_value=None):
+                with patch("kagent.claude._executor.clear_kagent_span_attributes"):
+                    await executor.execute(request_context, event_queue)
+
+    # Last event should be failed with timeout type
+    last_call = event_queue.enqueue_event.call_args_list[-1]
+    last_event = last_call[0][0]
+    assert last_event.final is True
+    assert last_event.status.state.value == "failed"
+    assert last_event.metadata["kagent.claude.error_type"] == "timeout"
 
 
 @pytest.mark.asyncio
@@ -153,3 +191,28 @@ async def test_cancel_raises(executor, event_queue, request_context):
     """cancel() raises NotImplementedError."""
     with pytest.raises(NotImplementedError):
         await executor.cancel(request_context, event_queue)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_running_queries(session_store):
+    """shutdown() cancels all running queries."""
+    options = MagicMock()
+    options.__dict__ = {"allowed_tools": ["Bash"]}
+    executor = ClaudeAgentExecutor(
+        options=options,
+        session_store=session_store,
+        app_name="test-agent",
+    )
+    # Simulate a running query
+    from kagent.claude._executor import _RunningQuery
+
+    rq = _RunningQuery()
+    rq.task = asyncio.create_task(asyncio.sleep(100))
+    executor._running_queries["ctx-1"] = rq
+
+    await executor.shutdown()
+    # Let cancellation propagate
+    await asyncio.sleep(0)
+
+    assert rq.task.cancelled()
+    assert "ctx-1" not in executor._running_queries
