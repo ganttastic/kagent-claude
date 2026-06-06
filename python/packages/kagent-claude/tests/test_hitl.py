@@ -226,3 +226,85 @@ async def test_can_use_tool_callback_deny():
     result = await task
     assert hasattr(result, "message")
     assert "Access denied" in result.message
+
+
+class TestExtractAskUserAnswers:
+    def test_extracts_answers_from_data_part(self):
+        from kagent.claude._hitl import extract_ask_user_answers_text
+
+        part = MagicMock()
+        part.data = {
+            "ask_user_answers": [
+                {"answer": ["Yes, go ahead with the deployment"]},
+            ]
+        }
+
+        message = MagicMock()
+        message.parts = [part]
+
+        result = extract_ask_user_answers_text(message)
+        assert result == "Yes, go ahead with the deployment"
+
+    def test_extracts_multiple_answers(self):
+        from kagent.claude._hitl import extract_ask_user_answers_text
+
+        part = MagicMock()
+        part.data = {
+            "ask_user_answers": [
+                {"answer": ["First answer"]},
+                {"answer": ["Second answer"]},
+            ]
+        }
+
+        message = MagicMock()
+        message.parts = [part]
+
+        result = extract_ask_user_answers_text(message)
+        assert "First answer" in result
+        assert "Second answer" in result
+
+    def test_returns_none_for_no_answers(self):
+        from kagent.claude._hitl import extract_ask_user_answers_text
+
+        part = MagicMock()
+        part.data = {"some_other_key": "value"}
+
+        message = MagicMock()
+        message.parts = [part]
+
+        assert extract_ask_user_answers_text(message) is None
+
+    def test_returns_none_for_none_message(self):
+        from kagent.claude._hitl import extract_ask_user_answers_text
+
+        assert extract_ask_user_answers_text(None) is None
+
+    def test_handles_string_answers(self):
+        from kagent.claude._hitl import extract_ask_user_answers_text
+
+        part = MagicMock()
+        part.data = {
+            "ask_user_answers": ["plain string answer"],
+        }
+
+        message = MagicMock()
+        message.parts = [part]
+
+        result = extract_ask_user_answers_text(message)
+        assert result == "plain string answer"
+
+    def test_handles_answer_as_string(self):
+        from kagent.claude._hitl import extract_ask_user_answers_text
+
+        part = MagicMock()
+        part.data = {
+            "ask_user_answers": [
+                {"answer": "single string"},
+            ]
+        }
+
+        message = MagicMock()
+        message.parts = [part]
+
+        result = extract_ask_user_answers_text(message)
+        assert result == "single string"

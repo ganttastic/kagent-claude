@@ -52,6 +52,7 @@ from ._hitl import (
     HitlBridge,
     build_confirmation_data_part,
     build_confirmation_metadata,
+    extract_ask_user_answers_text,
     extract_hitl_decision_from_message,
     make_can_use_tool_callback,
 )
@@ -156,13 +157,19 @@ class ClaudeAgentExecutor(AgentExecutor):
             await self._handle_hitl_resume(context, event_queue)
             return
 
+        # Check if this is an ask-user answer (user responding to a question from Claude)
+        ask_user_text = extract_ask_user_answers_text(context.message)
+
         span_attributes = _build_span_attributes(context)
         context_token = set_kagent_span_attributes(span_attributes)
         try:
-            # Extract user input
-            user_input = context.get_user_input()
-            if not user_input:
-                user_input = _extract_text(context.message)
+            # Extract user input — prefer ask-user answer if present
+            if ask_user_text:
+                user_input = ask_user_text
+            else:
+                user_input = context.get_user_input()
+                if not user_input:
+                    user_input = _extract_text(context.message)
 
             # Look up existing Claude session for this context
             claude_session_id = self.session_store.get(context_id) if context_id else None

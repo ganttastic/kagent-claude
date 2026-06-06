@@ -24,12 +24,14 @@ from kagent.core.a2a import (
     A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY,
     A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
     A2A_DATA_PART_METADATA_TYPE_KEY,
+    KAGENT_ASK_USER_ANSWERS_KEY,
     KAGENT_HITL_DECISION_TYPE_APPROVE,
     KAGENT_HITL_DECISION_TYPE_BATCH,
     KAGENT_HITL_DECISION_TYPE_KEY,
     KAGENT_HITL_DECISION_TYPE_REJECT,
     KAGENT_HITL_DECISIONS_KEY,
     KAGENT_HITL_REJECTION_REASONS_KEY,
+    extract_ask_user_answers_from_message,
     extract_batch_decisions_from_message,
     extract_decision_from_message,
     extract_rejection_reasons_from_message,
@@ -288,3 +290,53 @@ async def make_can_use_tool_callback(bridge: HitlBridge, context_id: str):
             )
 
     return can_use_tool
+
+
+def extract_ask_user_answers_text(message) -> str | None:
+    """
+    Extract ask-user answer text from an A2A message.
+
+    When a user responds to a question from Claude (via the kagent dashboard),
+    the response comes as a DataPart with ask_user_answers. This function
+    extracts the answer text that should be passed back to Claude as the
+    next prompt on the resumed session.
+
+    Returns the concatenated answer text, or None if the message doesn't
+    contain ask-user answers.
+    """
+    if not message:
+        return None
+
+    # Try kagent-core's extraction first (works with real A2A DataParts)
+    answers = extract_ask_user_answers_from_message(message)
+
+    # Fallback: raw part inspection for non-standard messages
+    if not answers and hasattr(message, "parts") and message.parts:
+        for part in message.parts:
+            data = None
+            if hasattr(part, "data") and isinstance(getattr(part, "data", None), dict):
+                data = part.data
+            elif hasattr(part, "root") and hasattr(part.root, "data") and isinstance(getattr(part.root, "data", None), dict):
+                data = part.root.data
+
+            if isinstance(data, dict) and KAGENT_ASK_USER_ANSWERS_KEY in data:
+                answers = data[KAGENT_ASK_USER_ANSWERS_KEY]
+                break
+
+    if not answers:
+        return None
+
+    # Extract text from the answers list
+    # Each answer is typically {"answer": ["text1", "text2", ...]}
+    texts: list[str] = []
+    for answer_dict in answers:
+        if isinstance(answer_dict, dict):
+            answer_values = answer_dict.get("answer", [])
+            if isinstance(answer_values, list):
+                texts.extend(str(v) for v in answer_values if v)
+            elif isinstance(answer_values, str):
+                texts.append(answer_values)
+        elif isinstance(answer_dict, str):
+            texts.append(answer_dict)
+
+    return "\n".join(texts) if texts else None
