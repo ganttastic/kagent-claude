@@ -46,10 +46,10 @@ class PendingApproval:
     tool_name: str
     tool_input: dict
     tool_use_id: str | None = None
-    future: asyncio.Future = field(default=None, init=False)
+    future: asyncio.Future["ApprovalDecision"] = field(init=False)
 
     def __post_init__(self):
-        # Create the future lazily — requires a running event loop
+        # Create the future — requires a running event loop
         loop = asyncio.get_running_loop()
         self.future = loop.create_future()
 

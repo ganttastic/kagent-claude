@@ -39,7 +39,7 @@ jobs:
 
       - name: Type check with mypy
         run: |
-          mypy python/packages/kagent-claude/src/kagent/claude/ --ignore-missing-imports --no-error-summary
+          MYPYPATH=python/packages/kagent-claude/src mypy --namespace-packages --explicit-package-bases -p kagent.claude --ignore-missing-imports --no-error-summary
 
       - name: Security audit dependencies
         run: |

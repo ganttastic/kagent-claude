@@ -183,7 +183,10 @@ class ClaudeAgentExecutor(AgentExecutor):
         if not context.message:
             raise ValueError("A2A request must have a message")
 
-        context_id = context.context_id
+        # Narrow optional IDs from RequestContext — the A2A framework
+        # always provides these, but the SDK types them as str | None.
+        task_id: str = context.task_id or ""
+        context_id: str = context.context_id or ""
 
         # Check if this is a resume (HITL response)
         if self._is_hitl_resume(context):
@@ -214,13 +217,13 @@ class ClaudeAgentExecutor(AgentExecutor):
             if not context.current_task:
                 await event_queue.enqueue_event(
                     TaskStatusUpdateEvent(
-                        task_id=context.task_id,
+                        task_id=task_id,
                         status=TaskStatus(
                             state=TaskState.submitted,
                             message=context.message,
                             timestamp=datetime.now(timezone.utc).isoformat(),
                         ),
-                        context_id=context.context_id,
+                        context_id=context_id,
                         final=False,
                     )
                 )
@@ -228,16 +231,16 @@ class ClaudeAgentExecutor(AgentExecutor):
             # Signal working state with rich metadata
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(
-                    task_id=context.task_id,
+                    task_id=task_id,
                     status=TaskStatus(
                         state=TaskState.working,
                         timestamp=datetime.now(timezone.utc).isoformat(),
                     ),
-                    context_id=context.context_id,
+                    context_id=context_id,
                     final=False,
                     metadata=execution_metadata(
                         app_name=self.app_name,
-                        session_id=context.context_id,
+                        session_id=context_id,
                         claude_session_id=claude_session_id,
                         is_resume=claude_session_id is not None,
                     ),
@@ -264,12 +267,14 @@ class ClaudeAgentExecutor(AgentExecutor):
         event_queue: EventQueue,
     ) -> None:
         """Execute without HITL — streaming to completion with timeout."""
+        task_id = context.task_id or ""
+        context_id = context.context_id or ""
         start_time = time.monotonic()
 
         try:
             await asyncio.wait_for(
                 self._run_query_streaming(
-                    user_input, options, claude_session_id, context, event_queue
+                    user_input, options, claude_session_id, task_id, context_id, event_queue
                 ),
                 timeout=self._config.execution_timeout,
             )
@@ -279,28 +284,28 @@ class ClaudeAgentExecutor(AgentExecutor):
                 f"Execution timed out after {elapsed:.1f}s "
                 f"(limit: {self._config.execution_timeout}s)"
             ))
-            await self._emit_failed_classified(context, event_queue, classified)
+            await self._emit_failed_classified(task_id, context_id, event_queue, classified)
         except asyncio.CancelledError:
             classified = classify_error(asyncio.CancelledError())
-            await self._emit_failed_classified(context, event_queue, classified)
+            await self._emit_failed_classified(task_id, context_id, event_queue, classified)
         except Exception as e:
             classified = classify_error(e)
             logger.error(
                 f"Claude Agent SDK execution failed: {classified.error_type}: {e}",
                 exc_info=True,
             )
-            await self._emit_failed_classified(context, event_queue, classified)
+            await self._emit_failed_classified(task_id, context_id, event_queue, classified)
 
     async def _run_query_streaming(
         self,
         user_input: str,
         options: ClaudeAgentOptions,
         claude_session_id: str | None,
-        context: RequestContext,
+        task_id: str,
+        context_id: str,
         event_queue: EventQueue,
     ) -> None:
         """Core query loop with streaming intermediate events."""
-        context_id = context.context_id
         accumulated_text: list[str] = []
         new_session_id: str | None = None
         msg_index = 0
@@ -308,7 +313,7 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         # Streaming event emitter for deduplication
         emitter = StreamingEventEmitter(
-            task_id=context.task_id,
+            task_id=task_id,
             context_id=context_id,
         )
 
@@ -355,7 +360,7 @@ class ClaudeAgentExecutor(AgentExecutor):
         # Emit completion with rich metadata
         duration_ms = (time.monotonic() - start_time) * 1000
         await self._emit_completed(
-            context, event_queue, final_text,
+            task_id, context_id, event_queue, final_text,
             metadata=completion_metadata(
                 session_id=context_id,
                 claude_session_id=new_session_id,
@@ -421,12 +426,13 @@ class ClaudeAgentExecutor(AgentExecutor):
         kagent dashboard, the bridge resolves the Future and the hook returns
         the decision to the SDK.
         """
-        context_id = context.context_id
+        context_id = context.context_id or ""
+        task_id = context.task_id or ""
 
         # SEC-4: Guard against unbounded concurrent HITL queries
         if len(self._running_queries) >= MAX_CONCURRENT_HITL_QUERIES:
             await self._emit_failed(
-                context, event_queue,
+                task_id, context_id, event_queue,
                 f"Too many concurrent HITL queries (limit: {MAX_CONCURRENT_HITL_QUERIES}). "
                 "Please resolve or cancel pending approvals before starting new queries.",
             )
@@ -479,7 +485,7 @@ class ClaudeAgentExecutor(AgentExecutor):
         # Wait for either: completion OR an HITL approval request
         try:
             await asyncio.wait_for(
-                self._wait_for_hitl_or_completion(context_id, rq, context, event_queue),
+                self._wait_for_hitl_or_completion(context_id, task_id, rq, event_queue),
                 timeout=self._config.execution_timeout,
             )
         except asyncio.TimeoutError:
@@ -491,13 +497,13 @@ class ClaudeAgentExecutor(AgentExecutor):
             classified = classify_error(asyncio.TimeoutError(
                 f"Execution timed out after {self._config.execution_timeout}s"
             ))
-            await self._emit_failed_classified(context, event_queue, classified)
+            await self._emit_failed_classified(task_id, context_id, event_queue, classified)
 
     async def _wait_for_hitl_or_completion(
         self,
         context_id: str,
+        task_id: str,
         rq: _RunningQuery,
-        context: RequestContext,
         event_queue: EventQueue,
     ) -> None:
         """Wait until the query completes or HITL input is needed.
@@ -514,6 +520,7 @@ class ClaudeAgentExecutor(AgentExecutor):
         hitl_waiter = asyncio.ensure_future(_wait_for_hitl())
         try:
             # Wait for whichever fires first: query done or HITL needed
+            assert rq.task is not None, "Background query task must be set"
             logger.debug(f"HITL wait: task.done={rq.task.done()}, hitl_event.is_set={rq.hitl_event.is_set()}")
             done, _pending = await asyncio.wait(
                 [rq.task, hitl_waiter],
@@ -523,7 +530,7 @@ class ClaudeAgentExecutor(AgentExecutor):
             if hitl_waiter in done:
                 # Claude is paused waiting for approval — emit input_required
                 logger.info(f"HITL: tool approval needed for context {context_id}")
-                await self._emit_input_required(context, event_queue)
+                await self._emit_input_required(task_id, context_id, event_queue)
                 # Reset the event for the next round of HITL
                 rq.hitl_event.clear()
                 # Return control — the next execute() call will resume
@@ -548,12 +555,12 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         if rq.error:
             classified = classify_error(rq.error)
-            await self._emit_failed_classified(context, event_queue, classified)
+            await self._emit_failed_classified(task_id, context_id, event_queue, classified)
         else:
             if rq.session_id and context_id:
                 self.session_store.set(context_id, rq.session_id)
             await self._emit_completed(
-                context, event_queue, rq.result_text, tool_parts=rq.tool_parts
+                task_id, context_id, event_queue, rq.result_text, tool_parts=rq.tool_parts
             )
 
     def _is_hitl_resume(self, context: RequestContext) -> bool:
@@ -572,12 +579,13 @@ class ClaudeAgentExecutor(AgentExecutor):
         event_queue: EventQueue,
     ) -> None:
         """Handle a HITL resume: resolve pending approvals and wait for completion."""
-        context_id = context.context_id
+        context_id = context.context_id or ""
+        task_id = context.task_id or ""
         logger.info(f"HITL resume for context {context_id}")
         result = extract_hitl_decision_from_message(context.message)
         if not result:
             logger.warning(f"HITL resume: invalid message for context {context_id}")
-            await self._emit_failed(context, event_queue, "Invalid HITL response message")
+            await self._emit_failed(task_id, context_id, event_queue, "Invalid HITL response message")
             return
 
         decision_type, decisions, rejection_reasons = result
@@ -604,7 +612,7 @@ class ClaudeAgentExecutor(AgentExecutor):
         # Wait for the background query to either complete or hit another HITL
         rq = self._running_queries.get(context_id)
         if not rq:
-            await self._emit_failed(context, event_queue, "No running query to resume")
+            await self._emit_failed(task_id, context_id, event_queue, "No running query to resume")
             return
 
         # Atomically swap the request reference for this resume —
@@ -618,7 +626,7 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         try:
             await asyncio.wait_for(
-                self._wait_for_hitl_or_completion(context_id, rq, context, event_queue),
+                self._wait_for_hitl_or_completion(context_id, task_id, rq, event_queue),
                 timeout=self._config.execution_timeout,
             )
         except asyncio.TimeoutError:
@@ -627,15 +635,15 @@ class ClaudeAgentExecutor(AgentExecutor):
             self._running_queries.pop(context_id, None)
             self._hitl_bridge.cancel_all(context_id)
             classified = classify_error(asyncio.TimeoutError("HITL resume timed out"))
-            await self._emit_failed_classified(context, event_queue, classified)
+            await self._emit_failed_classified(task_id, context_id, event_queue, classified)
 
     async def _emit_input_required(
         self,
-        context: RequestContext,
+        task_id: str,
+        context_id: str,
         event_queue: EventQueue,
     ) -> None:
         """Emit input_required with tool approval DataParts."""
-        context_id = context.context_id
         pending = self._hitl_bridge.get_pending(context_id)
 
         parts: list[Part] = []
@@ -651,7 +659,7 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(
-                task_id=context.task_id,
+                task_id=task_id,
                 status=TaskStatus(
                     state=TaskState.input_required,
                     timestamp=datetime.now(timezone.utc).isoformat(),
@@ -661,14 +669,15 @@ class ClaudeAgentExecutor(AgentExecutor):
                         parts=parts,
                     ),
                 ),
-                context_id=context.context_id,
+                context_id=context_id,
                 final=False,
             )
         )
 
     async def _emit_completed(
         self,
-        context: RequestContext,
+        task_id: str,
+        context_id: str,
         event_queue: EventQueue,
         text: str,
         metadata: dict[str, Any] | None = None,
@@ -688,9 +697,9 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         await event_queue.enqueue_event(
             TaskArtifactUpdateEvent(
-                task_id=context.task_id,
+                task_id=task_id,
                 last_chunk=True,
-                context_id=context.context_id,
+                context_id=context_id,
                 artifact=Artifact(
                     artifact_id=str(uuid.uuid4()),
                     parts=parts,
@@ -699,12 +708,12 @@ class ClaudeAgentExecutor(AgentExecutor):
         )
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(
-                task_id=context.task_id,
+                task_id=task_id,
                 status=TaskStatus(
                     state=TaskState.completed,
                     timestamp=datetime.now(timezone.utc).isoformat(),
                 ),
-                context_id=context.context_id,
+                context_id=context_id,
                 final=True,
                 metadata=metadata,
             )
@@ -712,7 +721,8 @@ class ClaudeAgentExecutor(AgentExecutor):
 
     async def _emit_failed(
         self,
-        context: RequestContext,
+        task_id: str,
+        context_id: str,
         event_queue: EventQueue,
         error_msg: str,
     ) -> None:
@@ -720,7 +730,7 @@ class ClaudeAgentExecutor(AgentExecutor):
         logger.error(f"Claude Agent SDK execution failed: {error_msg}")
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(
-                task_id=context.task_id,
+                task_id=task_id,
                 status=TaskStatus(
                     state=TaskState.failed,
                     timestamp=datetime.now(timezone.utc).isoformat(),
@@ -730,14 +740,15 @@ class ClaudeAgentExecutor(AgentExecutor):
                         parts=[Part(TextPart(text=error_msg))],
                     ),
                 ),
-                context_id=context.context_id,
+                context_id=context_id,
                 final=True,
             )
         )
 
     async def _emit_failed_classified(
         self,
-        context: RequestContext,
+        task_id: str,
+        context_id: str,
         event_queue: EventQueue,
         classified: ClassifiedError,
     ) -> None:
@@ -748,7 +759,7 @@ class ClaudeAgentExecutor(AgentExecutor):
         )
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(
-                task_id=context.task_id,
+                task_id=task_id,
                 status=TaskStatus(
                     state=TaskState.failed,
                     timestamp=datetime.now(timezone.utc).isoformat(),
@@ -758,7 +769,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                         parts=[Part(TextPart(text=classified.user_message))],
                     ),
                 ),
-                context_id=context.context_id,
+                context_id=context_id,
                 final=True,
                 metadata=error_metadata(
                     error_type=classified.error_type,
@@ -968,9 +979,9 @@ def _build_span_attributes(context: RequestContext) -> dict[str, Any]:
     if context.call_context and context.call_context.user and context.call_context.user.user_name:
         user_id = context.call_context.user.user_name
 
-    attrs = {
+    attrs: dict[str, Any] = {
         "kagent.user_id": user_id,
-        "gen_ai.conversation.id": context.context_id,
+        "gen_ai.conversation.id": context.context_id or "",
     }
     if context.task_id:
         attrs["gen_ai.task.id"] = context.task_id

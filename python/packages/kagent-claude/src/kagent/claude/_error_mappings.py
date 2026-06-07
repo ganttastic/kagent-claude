@@ -60,7 +60,7 @@ class ClassifiedError:
     is_transient: bool = False
 
 
-def classify_error(exception: Exception) -> ClassifiedError:
+def classify_error(exception: BaseException) -> ClassifiedError:
     """
     Classify an exception into a user-friendly error with structured metadata.
 
