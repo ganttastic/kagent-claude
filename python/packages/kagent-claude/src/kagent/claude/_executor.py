@@ -8,10 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-try:
-    from typing import override
-except ImportError:
-    from typing_extensions import override
+from typing_extensions import override
 
 from a2a.server.agent_execution import AgentExecutor
 from a2a.server.agent_execution.context import RequestContext
