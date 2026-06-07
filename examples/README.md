@@ -69,6 +69,7 @@ All variables are optional except `ANTHROPIC_API_KEY`.
 | `CLAUDE_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep` | Comma-separated tool list |
 | `CLAUDE_SYSTEM_PROMPT` | *(none)* | System prompt for Claude |
 | `CLAUDE_MAX_TURNS` | `25` | Max turns before Claude stops |
+| `CLAUDE_MCP_SERVERS` | *(none)* | JSON object of MCP server configs (see below) |
 
 ### Executor
 
@@ -112,3 +113,42 @@ All variables are optional except `ANTHROPIC_API_KEY`.
   }
 ]
 ```
+
+### MCP Servers
+
+Configure MCP servers via the `CLAUDE_MCP_SERVERS` env var. This is a JSON
+object where each key is a server name and the value is its config:
+
+```json
+{
+  "github": {
+    "command": "npx",
+    "args": ["@modelcontextprotocol/server-github"],
+    "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"}
+  },
+  "postgres": {
+    "command": "npx",
+    "args": ["@modelcontextprotocol/server-postgres", "$DATABASE_URL"]
+  }
+}
+```
+
+**Environment variable interpolation**: Values containing `$VAR` or `${VAR}`
+are resolved against the pod's environment at startup. This lets you keep
+secrets in Kubernetes Secrets and reference them in MCP config:
+
+```yaml
+env:
+  - name: GITHUB_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: github-token
+        key: token
+  - name: CLAUDE_MCP_SERVERS
+    value: |
+      {"github": {"command": "npx",
+        "args": ["@modelcontextprotocol/server-github"],
+        "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"}}}
+```
+
+Use `$$` for a literal `$` if needed.

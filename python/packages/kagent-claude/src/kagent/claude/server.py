@@ -19,6 +19,14 @@ Environment Variables:
     CLAUDE_HITL             Enable HITL tool approval. Default: false.
     CLAUDE_HITL_TIMEOUT     HITL-specific timeout (overrides CLAUDE_TIMEOUT
                             when HITL is enabled). Default: 600.
+    CLAUDE_MCP_SERVERS      JSON object mapping server names to their config.
+                            Values in the config that look like $ENV_VAR are
+                            resolved against the pod environment at startup.
+                            Example:
+                              {"github": {"command": "npx",
+                                "args": ["@modelcontextprotocol/server-github"],
+                                "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"}}}
+                            Default: none (no MCP servers).
 
     AGENT_NAME              Agent card name. Default: claude-agent.
     AGENT_DESCRIPTION       Agent card description.
@@ -35,6 +43,7 @@ Environment Variables:
 import json
 import logging
 import os
+import re
 import sys
 
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
@@ -81,6 +90,62 @@ def _parse_tools(val: str) -> list[str]:
     if not val:
         return ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
     return [t.strip() for t in val.split(",") if t.strip()]
+
+
+# Matches $VAR_NAME or ${VAR_NAME} (not escaped with $$)
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _interpolate_env_vars(value):
+    """Recursively resolve $VAR and ${VAR} references against os.environ.
+
+    Works on strings, lists, and nested dicts. Non-string leaves are
+    returned unchanged. A literal ``$$`` is collapsed to ``$``.
+    """
+    if isinstance(value, str):
+        # Collapse escaped $$
+        result = value.replace("$$", "\x00")
+        # Replace $VAR / ${VAR} with env value (empty string if unset)
+        result = _ENV_VAR_PATTERN.sub(
+            lambda m: os.environ.get(m.group(1) or m.group(2), ""), result
+        )
+        return result.replace("\x00", "$")
+    if isinstance(value, dict):
+        return {k: _interpolate_env_vars(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_interpolate_env_vars(item) for item in value]
+    return value
+
+
+def _parse_mcp_servers(val: str) -> dict | None:
+    """Parse MCP server config from JSON with env var interpolation.
+
+    Returns a dict suitable for ``ClaudeAgentOptions(mcp_servers=...)``,
+    or None if no MCP servers are configured.
+
+    String values containing ``$VAR`` or ``${VAR}`` are resolved against
+    the pod environment. This lets secrets stay in Kubernetes Secrets:
+
+        CLAUDE_MCP_SERVERS='{"github": {"command": "npx",
+          "args": ["@modelcontextprotocol/server-github"],
+          "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"}}}'
+
+    The ``GITHUB_TOKEN`` env var is injected by the controller from a
+    Secret, and the MCP config picks it up at startup.
+    """
+    if not val:
+        return None
+    try:
+        raw = json.loads(val)
+        if not isinstance(raw, dict):
+            logger.warning("CLAUDE_MCP_SERVERS must be a JSON object, got %s", type(raw).__name__)
+            return None
+        resolved = _interpolate_env_vars(raw)
+        logger.info("MCP servers configured: %s", list(resolved.keys()))
+        return resolved
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning("Failed to parse CLAUDE_MCP_SERVERS: %s", e)
+        return None
 
 
 def _parse_skills(val: str) -> list[AgentSkill]:
@@ -133,6 +198,11 @@ def build_app() -> KAgentApp:
         options_kwargs["system_prompt"] = system_prompt
     if max_turns > 0:
         options_kwargs["max_turns"] = max_turns
+
+    # MCP servers
+    mcp_servers = _parse_mcp_servers(_env("CLAUDE_MCP_SERVERS"))
+    if mcp_servers:
+        options_kwargs["mcp_servers"] = mcp_servers
 
     options = ClaudeAgentOptions(**options_kwargs)
 
@@ -191,11 +261,13 @@ def build_app() -> KAgentApp:
     )
 
     # Log the configuration for visibility
+    mcp_names = list(mcp_servers.keys()) if mcp_servers else []
     logger.info(
         f"kagent-claude server configured: "
         f"name={agent_name} tools={tools} hitl={enable_hitl} "
         f"streaming={enable_streaming} timeout={timeout}s "
-        f"max_turns={max_turns} tracing={enable_tracing}"
+        f"max_turns={max_turns} tracing={enable_tracing} "
+        f"mcp_servers={mcp_names}"
     )
 
     return app

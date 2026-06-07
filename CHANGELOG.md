@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Golden image** (`ghcr.io/ganttastic/kagent-claude`) — fully env-configurable Claude agent server. Deploy to kagent with zero Python, zero Docker builds — just a YAML file.
+- `CLAUDE_MCP_SERVERS` env var for configuring MCP servers via JSON with `$VAR` interpolation against pod environment — secrets stay in Kubernetes Secrets
 - `kagent-claude-server` console script and `kagent.claude.server` module for the golden image entrypoint
 - `server.py` module with `build_app()` for env-var-driven configuration
 - `Dockerfile` at repo root for building the golden image

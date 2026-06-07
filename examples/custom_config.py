@@ -1,10 +1,11 @@
 """
 Example: MCP server integration with custom system prompt.
 
-This example shows the primary reason to write Python instead of using
-the golden image: MCP server configuration. MCP servers let Claude
-interact with external tools (databases, APIs, custom CLIs) that aren't
-part of the built-in tool set.
+MCP servers can also be configured via the CLAUDE_MCP_SERVERS env var
+on the golden image. Use this programmatic approach when you need:
+- Dynamic MCP server config (computed at startup)
+- Custom hooks or callbacks on the agent options
+- A custom SessionStore implementation
 
 Run locally:
     ANTHROPIC_API_KEY=sk-... KAGENT_URL=http://localhost:8083 \

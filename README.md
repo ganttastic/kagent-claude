@@ -97,8 +97,8 @@ See [`examples/`](examples/) for ready-to-use CRD files and the full
 
 ### Programmatic Usage
 
-For advanced use cases (MCP servers, custom hooks, custom session stores),
-write Python:
+For advanced use cases (custom hooks, custom session stores, complex
+agent logic), write Python:
 
 ```python
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
