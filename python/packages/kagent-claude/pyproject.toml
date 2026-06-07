@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "kagent-claude"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Claude Agent SDK integration for KAgent with A2A server support"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,10 @@ dev = [
 
 [project.scripts]
 kagent-claude-server = "kagent.claude.server:main"
+
+[tool.hatch.version]
+source = "vcs"
+raw-options.root = "../../.."
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kagent"]
