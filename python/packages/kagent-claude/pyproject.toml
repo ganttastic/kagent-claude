@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kagent-claude"
+version = "0.2.0"
+description = "Claude Agent SDK integration for KAgent with A2A server support"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "claude-agent-sdk>=0.2.0",
+  "httpx>=0.25.0",
+  "fastapi>=0.100.0",
+  "pydantic>=2.0.0",
+  "typing-extensions>=4.0.0",
+  "uvicorn>=0.20.0",
+  "a2a-sdk[http-server]>=0.3.23,<1.0.0",
+  "kagent-core>=0.1.0",
+  "opentelemetry-api>=1.38.0",
+  "opentelemetry-sdk>=1.38.0",
+  "openai>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+kagent-claude-server = "kagent.claude.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kagent"]
+
+[tool.ruff]
+extend = "../../pyproject.toml"

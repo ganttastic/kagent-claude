@@ -1,0 +1,63 @@
+# Zero-code Claude agent for kagent.
+#
+# Uses the published golden image — no Python or Docker build needed.
+# Configure everything via environment variables.
+#
+# Prerequisites:
+#   kubectl create secret generic kagent-anthropic \
+#     --namespace=kagent \
+#     --from-literal=ANTHROPIC_API_KEY=sk-ant-...
+#
+# Deploy:
+#   kubectl apply -f examples/agent.yaml
+---
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: claude-agent
+  namespace: kagent
+spec:
+  description: Claude-powered coding and research agent
+  type: BYO
+  byo:
+    deployment:
+      image: ghcr.io/ganttastic/kagent-claude:latest
+      env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kagent-anthropic
+              key: ANTHROPIC_API_KEY
+
+        # --- Claude SDK options ---
+        - name: CLAUDE_TOOLS
+          value: "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch"
+        # - name: CLAUDE_SYSTEM_PROMPT
+        #   value: "You are a senior engineer. Explain your reasoning."
+        # - name: CLAUDE_MAX_TURNS
+        #   value: "25"
+
+        # --- MCP servers (optional) ---
+        # Stdio:  {"name": {"command": "npx", "args": ["@org/server"]}}
+        # HTTP:   {"name": {"type": "http", "url": "http://server/mcp"}}
+        # - name: CLAUDE_MCP_SERVERS
+        #   value: '{"fetch": {"type": "http", "url": "http://mcp-server/mcp"}}'
+
+        # --- Skills (optional) ---
+        # Mount SKILL.md files via ConfigMap, then enable:
+        # - name: CLAUDE_SKILLS
+        #   value: "true"
+
+        # --- Executor options ---
+        # - name: CLAUDE_TIMEOUT
+        #   value: "300"
+        # - name: CLAUDE_STREAMING
+        #   value: "true"
+        # - name: CLAUDE_HITL
+        #   value: "false"
+
+        # --- Agent identity ---
+        # - name: AGENT_NAME
+        #   value: "claude-agent"
+        # - name: AGENT_DESCRIPTION
+        #   value: "Claude-powered agent running on kagent"
