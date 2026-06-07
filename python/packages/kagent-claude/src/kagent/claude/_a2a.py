@@ -66,11 +66,17 @@ class KAgentApp:
         self._enable_tracing = tracing
         self._session_store = ClaudeSessionStore()
 
-        # Build executor config from explicit config or legacy kwarg
+        # Build executor config — prefer explicit config, fall back to legacy kwarg
         if executor_config:
             self._executor_config = executor_config
-        else:
+        elif enable_hitl:
+            logger.warning(
+                "KAgentApp(enable_hitl=True) is deprecated. "
+                "Use executor_config=ClaudeExecutorConfig(enable_hitl=True) instead."
+            )
             self._executor_config = ClaudeExecutorConfig(enable_hitl=enable_hitl)
+        else:
+            self._executor_config = ClaudeExecutorConfig()
 
     def build(self) -> FastAPI:
         """Construct and return the FastAPI ASGI application."""

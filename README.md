@@ -96,16 +96,72 @@ ClaudeAgentOptions(
 )
 ```
 
+### ClaudeExecutorConfig
+
+Controls runtime behavior of the executor:
+
+```python
+from kagent.claude import ClaudeExecutorConfig
+
+ClaudeExecutorConfig(
+    execution_timeout=300.0,  # Max seconds before query is killed (default: 300)
+    enable_streaming=True,    # Stream tool calls/results to dashboard (default: True)
+    enable_hitl=False,        # Require user approval for tool use (default: False)
+)
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `execution_timeout` | `300.0` | Maximum seconds a query runs before timeout. Set higher (600+) for complex coding tasks. |
+| `enable_streaming` | `True` | Stream intermediate events (tool calls, results) to the kagent dashboard in real-time. |
+| `enable_hitl` | `False` | When enabled, tool invocations pause for user approval via the dashboard. |
+
+### KAgentApp Constructor
+
+```python
+KAgentApp(
+    options: ClaudeAgentOptions,                    # What Claude can do
+    agent_card: AgentCard,                          # A2A identity (name, skills, capabilities)
+    config: KAgentConfig = None,                    # Platform config (auto from env vars)
+    executor_config: ClaudeExecutorConfig = None,   # Runtime behavior (timeout, streaming, HITL)
+    tracing: bool = True,                           # Enable OpenTelemetry tracing
+)
+```
+
+### HITL (Human-in-the-Loop) Flow
+
+When `enable_hitl=True`, tool executions pause for user approval:
+
+1. Claude decides to use a tool (e.g., `Bash: rm -rf /tmp/data`)
+2. The executor emits `input_required` with tool details as a DataPart
+3. The kagent dashboard shows a confirmation dialog
+4. User approves → tool executes, Claude continues
+5. User denies → Claude receives the rejection reason and adapts
+
+See `examples/hitl.py` for a complete runnable example with curl commands.
+
+### Ask-User Answers
+
+When Claude asks the user a question (via the dashboard), the user's response
+is extracted from the `ask_user_answers` DataPart and passed back to Claude
+as the next prompt on the resumed session. This happens automatically — no
+configuration needed.
+
 ## Architecture
 
 ### Package Structure
 
 ```
 python/packages/kagent-claude/src/kagent/claude/
-├── __init__.py          # Public exports: KAgentApp, ClaudeAgentExecutor, ClaudeSessionStore
+├── __init__.py          # Public exports: KAgentApp, ClaudeAgentExecutor, ClaudeExecutorConfig
 ├── _a2a.py              # KAgentApp — assembles FastAPI server with A2A routes
+├── _converters.py       # Claude SDK messages → A2A DataParts for streaming
+├── _error_mappings.py   # Exception classification (rate_limit, auth, timeout, etc.)
 ├── _executor.py         # ClaudeAgentExecutor — A2A AgentExecutor implementation
-└── _session_store.py    # Maps A2A contextId to Claude session_id
+├── _hitl.py             # HITL bridge (approval flow + ask_user_answers)
+├── _metadata_utils.py   # Namespaced metadata builders for A2A events
+├── _session_store.py    # Maps A2A contextId to Claude session_id
+└── _tracing.py          # OpenTelemetry span helpers
 ```
 
 ### Key Components
@@ -113,11 +169,12 @@ python/packages/kagent-claude/src/kagent/claude/
 **`KAgentApp`** — The public entrypoint. Wires together the executor, task store, request handler, and A2A application into a runnable FastAPI server. Follows the same pattern as `kagent-crewai` and `kagent-langgraph`.
 
 **`ClaudeAgentExecutor`** — Implements the A2A `AgentExecutor` interface. On each `execute()` call:
-1. Extracts user text from the A2A message
+1. Extracts user text from the A2A message (or `ask_user_answers` if present)
 2. Looks up any existing Claude session for the context
-3. Calls `query(prompt, options)` with `resume` set in options if resuming
-4. Streams responses, capturing the `session_id` from the init `SystemMessage`
-5. Emits A2A events: `submitted` → `working` → `TaskArtifactUpdateEvent` → `completed`
+3. Calls `query(prompt, options)` with `resume` set if resuming, wrapped in `asyncio.wait_for()` for timeout
+4. Streams intermediate events (tool calls, tool results) to the dashboard via `_converters.py`
+5. Classifies errors via `_error_mappings.py` for user-friendly failure messages
+6. Emits A2A events: `submitted` → `working` → (streaming events) → `artifact` → `completed`
 
 **`ClaudeSessionStore`** — Bridges A2A's `contextId` (which groups related tasks) to the Claude Agent SDK's `session_id` (which resumes a context window). This enables multi-turn conversations that preserve Claude's full context across requests.
 

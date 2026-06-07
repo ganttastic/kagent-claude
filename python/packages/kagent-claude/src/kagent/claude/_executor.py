@@ -73,11 +73,33 @@ DEFAULT_EXECUTION_TIMEOUT = 300.0
 
 @dataclass
 class ClaudeExecutorConfig:
-    """Configuration for the ClaudeAgentExecutor."""
+    """
+    Runtime behavior configuration for the Claude executor.
+
+    Controls how the executor runs queries, reports progress, and handles
+    failure modes. Pass to KAgentApp via the `executor_config` parameter.
+
+    Example:
+        config = ClaudeExecutorConfig(
+            execution_timeout=600.0,   # 10 minutes for long tasks
+            enable_streaming=True,     # show tool calls in dashboard
+            enable_hitl=True,          # require approval for tool use
+        )
+        app = KAgentApp(..., executor_config=config)
+    """
 
     execution_timeout: float = DEFAULT_EXECUTION_TIMEOUT
+    """Maximum seconds a query can run before being killed. Default: 300 (5 min).
+    Set higher for complex coding tasks. Set lower for simple Q&A agents."""
+
     enable_streaming: bool = True
+    """Stream intermediate events (tool calls, tool results) to the kagent
+    dashboard in real-time. Disable if you only want final results."""
+
     enable_hitl: bool = False
+    """Enable Human-in-the-Loop approval for tool use. When enabled, tools
+    not in allowed_tools trigger an approval request in the dashboard.
+    The user can approve, deny, or modify tool inputs before execution."""
 
 
 class _RunningQuery:
