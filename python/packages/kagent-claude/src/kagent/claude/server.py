@@ -36,6 +36,13 @@ Environment Variables:
                             Default: all tools from all configured servers
                             (mcp__<server-name>__* for each server).
                             Example: "mcp__fetch__*,mcp__github__list_issues"
+    CLAUDE_SKILLS           Enable skill discovery. Default: false.
+                            Mount skills via ConfigMap at
+                            /app/.claude/skills/<name>/SKILL.md
+    CLAUDE_SKILLS_FILTER    Comma-separated list of skill names to enable.
+                            Default: all discovered skills.
+    CLAUDE_CWD              Working directory for skill discovery.
+                            Default: /app.
 
     AGENT_NAME              Agent card name. Default: claude-agent.
     AGENT_DESCRIPTION       Agent card description.
@@ -223,6 +230,20 @@ def build_app() -> KAgentApp:
             mcp_tools = [f"mcp__{name}__*" for name in mcp_servers]
         options_kwargs["allowed_tools"] = tools + mcp_tools
 
+    # Skills — discovered from .claude/skills/ in CLAUDE_CWD (default: /app)
+    # Mount skill files via ConfigMap at /app/.claude/skills/<name>/SKILL.md
+    claude_cwd = _env("CLAUDE_CWD", "/app")
+    enable_skills = _env_bool("CLAUDE_SKILLS", False)
+    if enable_skills:
+        options_kwargs["cwd"] = claude_cwd
+        options_kwargs["setting_sources"] = ["project"]
+        # Enable all discovered skills, or a specific comma-separated list
+        skills_filter = _env("CLAUDE_SKILLS_FILTER")
+        if skills_filter:
+            options_kwargs["skills"] = [s.strip() for s in skills_filter.split(",") if s.strip()]
+        else:
+            options_kwargs["skills"] = "all"
+
     options = ClaudeAgentOptions(**options_kwargs)
 
     # --- Executor config ---
@@ -281,12 +302,13 @@ def build_app() -> KAgentApp:
 
     # Log the configuration for visibility
     mcp_names = list(mcp_servers.keys()) if mcp_servers else []
+    skills_info = options_kwargs.get("skills", "disabled")
     logger.info(
         f"kagent-claude server configured: "
         f"name={agent_name} tools={tools} hitl={enable_hitl} "
         f"streaming={enable_streaming} timeout={timeout}s "
         f"max_turns={max_turns} tracing={enable_tracing} "
-        f"mcp_servers={mcp_names}"
+        f"mcp_servers={mcp_names} skills={skills_info}"
     )
 
     return app
