@@ -26,10 +26,25 @@ The package wraps `ClaudeAgentOptions` in a `KAgentApp` class that builds an [A2
 ## Installation
 
 ```bash
-pip install kagent-claude
+# Install from GitHub (not yet published to PyPI)
+pip install "kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude"
 ```
 
-Requires Python 3.10+.
+Or add to your `requirements.txt`:
+
+```
+kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude
+```
+
+Or in `pyproject.toml` dependencies:
+
+```toml
+dependencies = [
+    "kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude",
+]
+```
+
+Requires Python 3.10+. The `claude-agent-sdk` and `kagent-core` dependencies are installed automatically.
 
 ## Quick Start
 
@@ -195,14 +210,15 @@ python/packages/kagent-claude/src/kagent/claude/
 Enable tool approval gates so users can approve or deny tool usage from the kagent dashboard:
 
 ```python
+from kagent.claude import ClaudeExecutorConfig
+
 app = KAgentApp(
     options=ClaudeAgentOptions(
         # Don't pre-approve dangerous tools — let HITL handle them
         allowed_tools=["Read", "Glob", "Grep"],
     ),
     agent_card=agent_card,
-    config=config,
-    enable_hitl=True,  # Enable HITL
+    executor_config=ClaudeExecutorConfig(enable_hitl=True),
 )
 ```
 
@@ -271,25 +287,98 @@ When `enable_hitl=False` (default), the executor uses the simpler direct-streami
 
 ## Deployment
 
-### Prerequisites
+### Local Development
 
-- A Kubernetes cluster with [kagent](https://kagent.dev) installed
-- An Anthropic API key
-- Access to a container registry
-
-### Build and Push
+No Kubernetes or Docker required. Just install the package and run your agent:
 
 ```bash
-# Authenticate with GitHub Container Registry
-echo $GITHUB_TOKEN | docker login ghcr.io -u ganttastic --password-stdin
+pip install "kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude"
+```
 
-# Build and push
-./deploy/build-and-push.sh
-# Or with a specific tag:
-./deploy/build-and-push.sh v0.1.0
+Create your agent (`main.py`):
+
+```python
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill
+from claude_agent_sdk import ClaudeAgentOptions
+from kagent.claude import KAgentApp
+
+app = KAgentApp(
+    options=ClaudeAgentOptions(allowed_tools=["Bash", "Read", "Glob"]),
+    agent_card=AgentCard(
+        name="my-agent",
+        description="My Claude agent",
+        url="http://localhost:8080/",
+        version="1.0.0",
+        capabilities=AgentCapabilities(streaming=True),
+        default_input_modes=["text"],
+        default_output_modes=["text"],
+        skills=[],
+    ),
+)
+
+if __name__ == "__main__":
+    app.run(port=8080)
+```
+
+Run it:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... \
+KAGENT_URL=http://localhost:8083 \
+KAGENT_NAME=my-agent \
+KAGENT_NAMESPACE=default \
+python main.py
+```
+
+Send a message:
+
+```bash
+curl -X POST http://localhost:8080/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": "1", "method": "message/send",
+    "params": {
+      "message": {
+        "messageId": "msg-001", "role": "user",
+        "parts": [{"kind": "text", "text": "What files are in the current directory?"}]
+      }
+    }
+  }'
 ```
 
 ### Deploy to Kubernetes
+
+#### Prerequisites
+
+- A Kubernetes cluster with [kagent](https://kagent.dev) installed
+- An Anthropic API key
+- A container image with your agent
+
+#### Build your container image
+
+Create a `Dockerfile`:
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+
+RUN pip install --no-cache-dir --pre \
+    "kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude"
+
+COPY main.py .
+CMD ["python", "main.py"]
+```
+
+Build and push:
+
+```bash
+docker build -t ghcr.io/your-org/my-claude-agent:latest .
+docker push ghcr.io/your-org/my-claude-agent:latest
+```
+
+> **Note:** The `deploy/` directory in this repo contains a reference Dockerfile and build script if you prefer to build from source.
+
+#### Apply the Agent CRD
 
 1. **Create the API key secret:**
 
@@ -301,35 +390,39 @@ kubectl create secret generic kagent-anthropic \
 
 2. **Apply the Agent CRD:**
 
-```bash
-kubectl apply -f deploy/k8s/deployment.yaml
+```yaml
+# agent.yaml
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: my-claude-agent
+  namespace: kagent
+spec:
+  description: My Claude-powered agent
+  type: BYO
+  byo:
+    deployment:
+      image: ghcr.io/your-org/my-claude-agent:latest
+      env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kagent-anthropic
+              key: ANTHROPIC_API_KEY
 ```
 
-The kagent controller manages the Deployment and Service for BYO agents. You only need to apply the Agent CRD — kagent handles the rest.
+```bash
+kubectl apply -f agent.yaml
+```
+
+The kagent controller creates the Deployment and Service automatically. The `KAGENT_URL`, `KAGENT_NAME`, and `KAGENT_NAMESPACE` env vars are injected by the controller.
 
 3. **Verify:**
 
 ```bash
-# Check the agent is registered
 kubectl -n kagent get agents
-
-# Check the pod is running (created by kagent controller)
-kubectl -n kagent get pods -l kagent.dev/agent=claude-agent
-
-# Check logs
-kubectl -n kagent logs -l kagent.dev/agent=claude-agent
-```
-
-### Kubernetes Manifest Overview
-
-```
-deploy/
-├── Dockerfile           # Multi-stage build from package source
-├── build-and-push.sh   # Build + push to ghcr.io/ganttastic
-├── app/
-│   └── main.py         # The deployed agent application
-└── k8s/
-    └── deployment.yaml # Agent CRD (kagent manages Deployment + Service)
+kubectl -n kagent get pods -l kagent.dev/agent=my-claude-agent
+kubectl -n kagent logs -l kagent.dev/agent=my-claude-agent
 ```
 
 ## Session Continuity
