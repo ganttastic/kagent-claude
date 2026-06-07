@@ -48,6 +48,58 @@ Requires Python 3.10+. The `claude-agent-sdk` and `kagent-core` dependencies are
 
 ## Quick Start
 
+### Zero-Code Deployment (Recommended)
+
+Deploy a Claude agent with no Python and no Docker builds — just a YAML file:
+
+```bash
+# 1. Create your API key secret
+kubectl create secret generic kagent-anthropic \
+  --namespace=kagent \
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-...
+
+# 2. Deploy
+kubectl apply -f examples/agent.yaml
+```
+
+The published golden image (`ghcr.io/ganttastic/kagent-claude`) is fully
+configurable via environment variables. Customize tools, system prompt,
+timeouts, and HITL directly in the Agent CRD:
+
+```yaml
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: my-claude-agent
+  namespace: kagent
+spec:
+  description: My Claude agent
+  type: BYO
+  byo:
+    deployment:
+      image: ghcr.io/ganttastic/kagent-claude:latest
+      env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kagent-anthropic
+              key: ANTHROPIC_API_KEY
+        - name: CLAUDE_TOOLS
+          value: "Bash,Read,Write,Edit,Glob,Grep"
+        - name: CLAUDE_SYSTEM_PROMPT
+          value: "You are a senior engineer. Explain your reasoning."
+        - name: CLAUDE_HITL
+          value: "true"
+```
+
+See [`examples/`](examples/) for ready-to-use CRD files and the full
+[env var reference](examples/README.md#environment-variables).
+
+### Programmatic Usage
+
+For advanced use cases (MCP servers, custom hooks, custom session stores),
+write Python:
+
 ```python
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from claude_agent_sdk import ClaudeAgentOptions
@@ -57,6 +109,9 @@ from kagent.core import KAgentConfig
 app = KAgentApp(
     options=ClaudeAgentOptions(
         allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+        mcp_servers={
+            "my-server": {"command": "npx", "args": ["@my-org/my-mcp-server"]},
+        },
     ),
     agent_card=AgentCard(
         name="my-claude-agent",
@@ -75,12 +130,20 @@ app = KAgentApp(
             )
         ],
     ),
-    config=KAgentConfig(),  # reads KAGENT_URL, KAGENT_NAME, KAGENT_NAMESPACE from env
+    config=KAgentConfig(),
 )
 
 if __name__ == "__main__":
     app.run(port=8080)
 ```
+
+### Installation (for programmatic usage)
+
+```bash
+pip install "kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude"
+```
+
+Requires Python 3.10+. The `claude-agent-sdk` and `kagent-core` dependencies are installed automatically.
 
 ## Configuration
 
@@ -111,14 +174,14 @@ ClaudeAgentOptions(
 )
 ```
 
-### ClaudeExecutorConfig
+### ClaudeAgentExecutorConfig
 
 Controls runtime behavior of the executor:
 
 ```python
-from kagent.claude import ClaudeExecutorConfig
+from kagent.claude import ClaudeAgentExecutorConfig
 
-ClaudeExecutorConfig(
+ClaudeAgentExecutorConfig(
     execution_timeout=300.0,  # Max seconds before query is killed (default: 300)
     enable_streaming=True,    # Stream tool calls/results to dashboard (default: True)
     enable_hitl=False,        # Require user approval for tool use (default: False)
@@ -138,7 +201,7 @@ KAgentApp(
     options: ClaudeAgentOptions,                    # What Claude can do
     agent_card: AgentCard,                          # A2A identity (name, skills, capabilities)
     config: KAgentConfig = None,                    # Platform config (auto from env vars)
-    executor_config: ClaudeExecutorConfig = None,   # Runtime behavior (timeout, streaming, HITL)
+    executor_config: ClaudeAgentExecutorConfig = None,   # Runtime behavior (timeout, streaming, HITL)
     tracing: bool = True,                           # Enable OpenTelemetry tracing
 )
 ```
@@ -168,14 +231,15 @@ configuration needed.
 
 ```
 python/packages/kagent-claude/src/kagent/claude/
-├── __init__.py          # Public exports: KAgentApp, ClaudeAgentExecutor, ClaudeExecutorConfig
+├── __init__.py          # Public exports: KAgentApp, ClaudeAgentExecutor, ClaudeAgentExecutorConfig
+├── server.py            # Golden image entrypoint — env-configurable server
 ├── _a2a.py              # KAgentApp — assembles FastAPI server with A2A routes
 ├── _converters.py       # Claude SDK messages → A2A DataParts for streaming
 ├── _error_mappings.py   # Exception classification (rate_limit, auth, timeout, etc.)
 ├── _executor.py         # ClaudeAgentExecutor — A2A AgentExecutor implementation
 ├── _hitl.py             # HITL bridge (approval flow + ask_user_answers)
 ├── _metadata_utils.py   # Namespaced metadata builders for A2A events
-├── _session_store.py    # Maps A2A contextId to Claude session_id
+├── _session_store.py    # SessionStore protocol + in-memory LRU implementation
 └── _tracing.py          # OpenTelemetry span helpers
 ```
 
@@ -210,7 +274,7 @@ python/packages/kagent-claude/src/kagent/claude/
 Enable tool approval gates so users can approve or deny tool usage from the kagent dashboard:
 
 ```python
-from kagent.claude import ClaudeExecutorConfig
+from kagent.claude import ClaudeAgentExecutorConfig
 
 app = KAgentApp(
     options=ClaudeAgentOptions(
@@ -218,7 +282,7 @@ app = KAgentApp(
         allowed_tools=["Read", "Glob", "Grep"],
     ),
     agent_card=agent_card,
-    executor_config=ClaudeExecutorConfig(enable_hitl=True),
+    executor_config=ClaudeAgentExecutorConfig(enable_hitl=True),
 )
 ```
 
@@ -287,98 +351,10 @@ When `enable_hitl=False` (default), the executor uses the simpler direct-streami
 
 ## Deployment
 
-### Local Development
+### Using the Golden Image (Recommended)
 
-No Kubernetes or Docker required. Just install the package and run your agent:
-
-```bash
-pip install "kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude"
-```
-
-Create your agent (`main.py`):
-
-```python
-from a2a.types import AgentCapabilities, AgentCard, AgentSkill
-from claude_agent_sdk import ClaudeAgentOptions
-from kagent.claude import KAgentApp
-
-app = KAgentApp(
-    options=ClaudeAgentOptions(allowed_tools=["Bash", "Read", "Glob"]),
-    agent_card=AgentCard(
-        name="my-agent",
-        description="My Claude agent",
-        url="http://localhost:8080/",
-        version="1.0.0",
-        capabilities=AgentCapabilities(streaming=True),
-        default_input_modes=["text"],
-        default_output_modes=["text"],
-        skills=[],
-    ),
-)
-
-if __name__ == "__main__":
-    app.run(port=8080)
-```
-
-Run it:
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-... \
-KAGENT_URL=http://localhost:8083 \
-KAGENT_NAME=my-agent \
-KAGENT_NAMESPACE=default \
-python main.py
-```
-
-Send a message:
-
-```bash
-curl -X POST http://localhost:8080/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0", "id": "1", "method": "message/send",
-    "params": {
-      "message": {
-        "messageId": "msg-001", "role": "user",
-        "parts": [{"kind": "text", "text": "What files are in the current directory?"}]
-      }
-    }
-  }'
-```
-
-### Deploy to Kubernetes
-
-#### Prerequisites
-
-- A Kubernetes cluster with [kagent](https://kagent.dev) installed
-- An Anthropic API key
-- A container image with your agent
-
-#### Build your container image
-
-Create a `Dockerfile`:
-
-```dockerfile
-FROM python:3.12-slim
-WORKDIR /app
-
-RUN pip install --no-cache-dir --pre \
-    "kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude"
-
-COPY main.py .
-CMD ["python", "main.py"]
-```
-
-Build and push:
-
-```bash
-docker build -t ghcr.io/your-org/my-claude-agent:latest .
-docker push ghcr.io/your-org/my-claude-agent:latest
-```
-
-> **Note:** The `examples/` directory contains a ready-to-use Dockerfile, build script, and Agent CRD you can use directly or adapt.
-
-#### Apply the Agent CRD
+The published image `ghcr.io/ganttastic/kagent-claude` is a fully
+env-configurable Claude agent. No Python, no Docker builds required.
 
 1. **Create the API key secret:**
 
@@ -390,40 +366,43 @@ kubectl create secret generic kagent-anthropic \
 
 2. **Apply the Agent CRD:**
 
-```yaml
-# agent.yaml
-apiVersion: kagent.dev/v1alpha2
-kind: Agent
-metadata:
-  name: my-claude-agent
-  namespace: kagent
-spec:
-  description: My Claude-powered agent
-  type: BYO
-  byo:
-    deployment:
-      image: ghcr.io/your-org/my-claude-agent:latest
-      env:
-        - name: ANTHROPIC_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: kagent-anthropic
-              key: ANTHROPIC_API_KEY
-```
-
 ```bash
-kubectl apply -f agent.yaml
+kubectl apply -f examples/agent.yaml
 ```
-
-The kagent controller creates the Deployment and Service automatically. The `KAGENT_URL`, `KAGENT_NAME`, and `KAGENT_NAMESPACE` env vars are injected by the controller.
 
 3. **Verify:**
 
 ```bash
 kubectl -n kagent get agents
-kubectl -n kagent get pods -l kagent.dev/agent=my-claude-agent
-kubectl -n kagent logs -l kagent.dev/agent=my-claude-agent
+kubectl -n kagent get pods -l kagent.dev/agent=claude-agent
+kubectl -n kagent logs -l kagent.dev/agent=claude-agent
 ```
+
+The kagent controller creates the Deployment and Service automatically. The
+`KAGENT_URL`, `KAGENT_NAME`, and `KAGENT_NAMESPACE` env vars are injected
+by the controller. See [`examples/README.md`](examples/README.md) for the
+full env var reference.
+
+### Custom Image (for MCP servers, hooks, etc.)
+
+If you need features the golden image can't express, write a Python
+entrypoint and build a custom image:
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+RUN pip install --no-cache-dir --pre \
+    "kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude"
+COPY main.py .
+CMD ["python", "main.py"]
+```
+
+```bash
+docker build -t ghcr.io/your-org/my-claude-agent:latest .
+docker push ghcr.io/your-org/my-claude-agent:latest
+```
+
+Then reference your image in the Agent CRD instead of the golden image.
 
 ## Session Continuity
 
@@ -432,19 +411,38 @@ The Claude Agent SDK maintains conversation context via sessions. When kagent se
 1. On the first message: starts a fresh Claude session, captures the `session_id` from the init event
 2. On subsequent messages: passes `ClaudeAgentOptions(resume=session_id)` so Claude retains its full context window (files read, analysis done, conversation history)
 
-This is stored in-memory. For persistence across pod restarts, a Redis or controller-backed store can be substituted (not yet implemented).
+This is stored in-memory with LRU eviction (default 1024 sessions). For
+persistence across pod restarts, implement the `SessionStore` protocol with
+a Redis or controller-backed backend:
+
+```python
+from kagent.claude import SessionStore
+
+class RedisSessionStore:
+    """Example custom session store."""
+    def get(self, context_id: str) -> str | None: ...
+    def set(self, context_id: str, claude_session_id: str) -> None: ...
+    def delete(self, context_id: str) -> None: ...
+```
 
 ## Local Development
 
-### Run tests
+### Run the golden image server locally
 
 ```bash
-cd python/packages/kagent-claude
-pip install -e ".[dev]"
-pytest tests/
+export ANTHROPIC_API_KEY=sk-ant-...
+export KAGENT_URL=http://localhost:8083
+export KAGENT_NAME=claude-agent
+export KAGENT_NAMESPACE=default
+
+# Using the console script
+kagent-claude-server
+
+# Or as a Python module
+python -m kagent.claude.server
 ```
 
-### Run the example locally
+### Run an example
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -455,7 +453,15 @@ export KAGENT_NAMESPACE=default
 python examples/basic.py
 ```
 
-Then test with an A2A request:
+### Run tests
+
+```bash
+cd python/packages/kagent-claude
+pip install -e ".[dev]"
+pytest tests/
+```
+
+### Test with an A2A request
 
 ```bash
 curl -X POST http://localhost:8080/ \

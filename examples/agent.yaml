@@ -1,15 +1,15 @@
-# Example kagent-claude BYO Agent
+# Zero-code Claude agent for kagent.
 #
-# The kagent controller creates the Deployment and Service automatically.
-# You only need to:
-# 1. Create the Secret with your Anthropic API key
-# 2. Build and push your container image
-# 3. Apply this file
+# Uses the published golden image — no Python or Docker build needed.
+# Configure everything via environment variables.
 #
 # Prerequisites:
 #   kubectl create secret generic kagent-anthropic \
 #     --namespace=kagent \
 #     --from-literal=ANTHROPIC_API_KEY=sk-ant-...
+#
+# Deploy:
+#   kubectl apply -f examples/agent.yaml
 ---
 apiVersion: kagent.dev/v1alpha2
 kind: Agent
@@ -21,11 +21,32 @@ spec:
   type: BYO
   byo:
     deployment:
-      # Replace with your own image
-      image: ghcr.io/your-org/my-claude-agent:latest
+      image: ghcr.io/ganttastic/kagent-claude:latest
       env:
         - name: ANTHROPIC_API_KEY
           valueFrom:
             secretKeyRef:
               name: kagent-anthropic
               key: ANTHROPIC_API_KEY
+
+        # --- Claude SDK options ---
+        - name: CLAUDE_TOOLS
+          value: "Bash,Read,Write,Edit,Glob,Grep"
+        # - name: CLAUDE_SYSTEM_PROMPT
+        #   value: "You are a senior engineer. Explain your reasoning."
+        # - name: CLAUDE_MAX_TURNS
+        #   value: "25"
+
+        # --- Executor options ---
+        # - name: CLAUDE_TIMEOUT
+        #   value: "300"
+        # - name: CLAUDE_STREAMING
+        #   value: "true"
+        # - name: CLAUDE_HITL
+        #   value: "false"
+
+        # --- Agent identity ---
+        # - name: AGENT_NAME
+        #   value: "claude-agent"
+        # - name: AGENT_DESCRIPTION
+        #   value: "Claude-powered agent running on kagent"

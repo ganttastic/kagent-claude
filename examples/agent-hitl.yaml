@@ -1,0 +1,50 @@
+# Claude agent with Human-in-the-Loop (HITL) approval.
+#
+# Every tool invocation pauses for user approval in the kagent dashboard.
+# Uses the published golden image — no Python or Docker build needed.
+#
+# Prerequisites:
+#   kubectl create secret generic kagent-anthropic \
+#     --namespace=kagent \
+#     --from-literal=ANTHROPIC_API_KEY=sk-ant-...
+#
+# Deploy:
+#   kubectl apply -f examples/agent-hitl.yaml
+---
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: claude-hitl-agent
+  namespace: kagent
+spec:
+  description: Claude agent with human approval for all tool use
+  type: BYO
+  byo:
+    deployment:
+      image: ghcr.io/ganttastic/kagent-claude:latest
+      env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kagent-anthropic
+              key: ANTHROPIC_API_KEY
+
+        # Enable HITL — tools pause for approval
+        - name: CLAUDE_HITL
+          value: "true"
+
+        # HITL sessions need more time (user may take a while)
+        - name: CLAUDE_HITL_TIMEOUT
+          value: "600"
+
+        # Restrict tools to read-only by default
+        - name: CLAUDE_TOOLS
+          value: "Bash,Read,Glob,Grep"
+
+        - name: CLAUDE_SYSTEM_PROMPT
+          value: "You are a careful engineer. Always explain what you plan to do and why before taking action."
+
+        - name: AGENT_NAME
+          value: "claude-hitl-agent"
+        - name: AGENT_DESCRIPTION
+          value: "Claude agent with human approval for all tool use"

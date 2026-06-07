@@ -1,26 +1,19 @@
 """
-Example kagent-claude BYO agent.
+Minimal programmatic agent — equivalent to the golden image with defaults.
+
+For most use cases, you don't need this file. The golden image
+(ghcr.io/ganttastic/kagent-claude) is fully configurable via env vars.
+
+Use this pattern when you need something the env vars can't express:
+- MCP server configuration
+- Custom hooks or callbacks
+- Custom session store implementations
+- Complex skill definitions
 
 Run locally:
     ANTHROPIC_API_KEY=sk-... KAGENT_URL=http://localhost:8083 \
     KAGENT_NAME=claude-agent KAGENT_NAMESPACE=default \
     python examples/basic.py
-
-Then send an A2A message:
-    curl -X POST http://localhost:8080/ \
-      -H "Content-Type: application/json" \
-      -d '{
-        "jsonrpc": "2.0",
-        "id": "1",
-        "method": "message/send",
-        "params": {
-          "message": {
-            "messageId": "msg-001",
-            "role": "user",
-            "parts": [{"kind": "text", "text": "What files are in the current directory?"}]
-          }
-        }
-      }'
 """
 
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
@@ -54,7 +47,7 @@ app = KAgentApp(
             )
         ],
     ),
-    config=KAgentConfig(),  # reads from KAGENT_URL, KAGENT_NAME, KAGENT_NAMESPACE env vars
+    config=KAgentConfig(),
 )
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test lint format build run run-hitl run-custom clean
+.PHONY: help install test lint format build push run run-hitl run-custom run-server clean
 
 PACKAGE_DIR := python/packages/kagent-claude
 IMAGE       ?= ghcr.io/ganttastic/kagent-claude
@@ -24,7 +24,13 @@ format: ## Auto-format with ruff
 	ruff format $(PACKAGE_DIR)/src/ $(PACKAGE_DIR)/tests/ examples/
 	ruff check --fix $(PACKAGE_DIR)/src/ $(PACKAGE_DIR)/tests/ examples/
 
-# ── Run examples ─────────────────────────────────────────────
+# ── Run ──────────────────────────────────────────────────────
+
+run-server: ## Run the golden image server locally (env-configured)
+	KAGENT_URL=$${KAGENT_URL:-http://localhost:8083} \
+	KAGENT_NAME=$${KAGENT_NAME:-claude-agent} \
+	KAGENT_NAMESPACE=$${KAGENT_NAMESPACE:-default} \
+	python -m kagent.claude.server
 
 run: ## Run the basic example agent
 	KAGENT_URL=$${KAGENT_URL:-http://localhost:8083} \
@@ -44,12 +50,12 @@ run-custom: ## Run the custom config example agent
 	KAGENT_NAMESPACE=$${KAGENT_NAMESPACE:-default} \
 	python examples/custom_config.py
 
-# ── Docker ───────────────────────────────────────────────────
+# ── Docker (golden image) ───────────────────────────────────
 
-build: ## Build the container image (IMAGE=... TAG=...)
-	docker build -t $(IMAGE):$(TAG) -f examples/Dockerfile examples/
+build: ## Build the golden image (IMAGE=... TAG=...)
+	docker build -t $(IMAGE):$(TAG) .
 
-push: build ## Build and push the container image
+push: build ## Build and push the golden image
 	docker push $(IMAGE):$(TAG)
 
 # ── Cleanup ──────────────────────────────────────────────────
