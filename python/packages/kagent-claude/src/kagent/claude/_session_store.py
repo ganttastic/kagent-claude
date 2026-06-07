@@ -3,7 +3,6 @@
 from collections import OrderedDict
 from typing import Protocol, runtime_checkable
 
-
 # Default maximum number of sessions to keep in the in-memory store.
 # Prevents unbounded memory growth for long-running pods.
 DEFAULT_MAX_SESSIONS = 1024

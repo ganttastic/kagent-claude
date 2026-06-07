@@ -9,7 +9,6 @@ from .conftest import (
     MockTextBlock,
     MockToolUseBlock,
     async_iter,
-    make_executor,
 )
 
 

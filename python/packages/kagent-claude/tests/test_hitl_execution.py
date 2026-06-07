@@ -1,13 +1,13 @@
 """Tests for HITL (Human-in-the-Loop) execution path in ClaudeAgentExecutor."""
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from a2a.types import DataPart, Message, Part, Role
 
-from kagent.claude._executor import ClaudeAgentExecutor, ClaudeAgentExecutorConfig, _RunningQuery
-from kagent.claude._hitl import HitlBridge, ApprovalDecision
+from kagent.claude._executor import _RunningQuery
+from kagent.claude._hitl import ApprovalDecision
 
 from .conftest import (
     MockResultMessage,
@@ -56,7 +56,7 @@ async def test_hitl_resume_approve_resolves_pending(
     event_queue, session_store, patch_executor_deps
 ):
     """A HITL resume with 'approve' decision resolves pending approvals."""
-    mock_query = patch_executor_deps
+    _ = patch_executor_deps
     executor = make_executor(session_store, enable_hitl=True, enable_streaming=False)
 
     # Set up a running query with a pending approval

@@ -11,6 +11,7 @@ from a2a.types import AgentCard
 from claude_agent_sdk import ClaudeAgentOptions
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
+
 from kagent.core import KAgentConfig, configure_logging, configure_tracing
 from kagent.core.a2a import (
     KAgentRequestContextBuilder,

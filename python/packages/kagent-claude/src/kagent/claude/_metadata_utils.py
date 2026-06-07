@@ -8,7 +8,6 @@ enabling structured observability in the kagent dashboard.
 from datetime import datetime, timezone
 from typing import Any
 
-
 # Namespace prefix for all kagent-claude metadata
 _PREFIX = "kagent.claude"
 

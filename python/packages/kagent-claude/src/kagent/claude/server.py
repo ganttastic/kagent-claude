@@ -60,7 +60,6 @@ import json
 import logging
 import os
 import re
-import sys
 
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from claude_agent_sdk import ClaudeAgentOptions

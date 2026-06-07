@@ -30,6 +30,7 @@ from a2a.types import (
 )
 from claude_agent_sdk import ClaudeAgentOptions, SystemMessage, query
 from claude_agent_sdk.types import HookMatcher
+
 from kagent.core.a2a import (
     KAGENT_HITL_DECISION_TYPE_APPROVE,
     KAGENT_HITL_DECISION_TYPE_BATCH,
@@ -46,7 +47,7 @@ from ._converters import (
     convert_message_to_parts,
     make_message_id,
 )
-from ._error_mappings import ClassifiedError, classify_error, get_error_metadata
+from ._error_mappings import ClassifiedError, classify_error
 from ._hitl import (
     ApprovalDecision,
     HitlBridge,
@@ -61,7 +62,7 @@ from ._metadata_utils import (
     execution_metadata,
     streaming_metadata,
 )
-from ._session_store import ClaudeSessionStore, SessionStore
+from ._session_store import SessionStore
 from ._tracing import record_completion, record_message_event, trace_query
 
 logger = logging.getLogger(__name__)
@@ -251,7 +252,6 @@ class ClaudeAgentExecutor(AgentExecutor):
         event_queue: EventQueue,
     ) -> None:
         """Execute without HITL — streaming to completion with timeout."""
-        context_id = context.context_id
         start_time = time.monotonic()
 
         try:

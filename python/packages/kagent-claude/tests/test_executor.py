@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kagent.claude._executor import ClaudeAgentExecutor, ClaudeAgentExecutorConfig, _RunningQuery
+from kagent.claude._executor import _RunningQuery
 
 from .conftest import MockResultMessage, MockSystemMessage, async_iter, make_executor
 
@@ -64,7 +64,7 @@ async def test_execute_handles_exception(executor, event_queue, request_context,
 
     async def _failing_iter():
         raise RuntimeError("Claude SDK error")
-        yield  # noqa: unreachable — makes this an async generator
+        yield  # noqa: F841 — makes this an async generator
 
     mock_query.return_value = _failing_iter()
 
@@ -123,7 +123,7 @@ async def test_shutdown_cancels_running_queries(session_store):
 @pytest.mark.asyncio
 async def test_max_concurrent_hitl_queries(event_queue, request_context, session_store, patch_executor_deps):
     """HITL execution is rejected when max concurrent queries is exceeded."""
-    mock_query = patch_executor_deps
+    _ = patch_executor_deps
     executor = make_executor(session_store, enable_hitl=True, enable_streaming=False)
 
     # Fill up the running queries dict

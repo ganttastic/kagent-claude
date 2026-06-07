@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from kagent.claude._converters import (
     StreamingEventEmitter,
     classify_sdk_message,

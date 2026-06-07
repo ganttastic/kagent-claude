@@ -20,22 +20,21 @@ import uuid
 from dataclasses import dataclass, field
 
 from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
+
 from kagent.core.a2a import (
     A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY,
     A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
     A2A_DATA_PART_METADATA_TYPE_KEY,
     KAGENT_ASK_USER_ANSWERS_KEY,
     KAGENT_HITL_DECISION_TYPE_APPROVE,
-    KAGENT_HITL_DECISION_TYPE_BATCH,
     KAGENT_HITL_DECISION_TYPE_KEY,
-    KAGENT_HITL_DECISION_TYPE_REJECT,
-    get_kagent_metadata_key,
     KAGENT_HITL_DECISIONS_KEY,
     KAGENT_HITL_REJECTION_REASONS_KEY,
     extract_ask_user_answers_from_message,
     extract_batch_decisions_from_message,
     extract_decision_from_message,
     extract_rejection_reasons_from_message,
+    get_kagent_metadata_key,
 )
 
 logger = logging.getLogger(__name__)

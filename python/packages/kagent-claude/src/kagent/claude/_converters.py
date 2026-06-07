@@ -17,9 +17,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from a2a.types import DataPart, Message, Part, Role, TaskStatusUpdateEvent, TaskState, TaskStatus, TextPart
+from a2a.types import DataPart, Message, Part, Role, TaskState, TaskStatus, TaskStatusUpdateEvent, TextPart
+
 from kagent.core.a2a import (
-    A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY,
     A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
     A2A_DATA_PART_METADATA_TYPE_KEY,
     get_kagent_metadata_key,

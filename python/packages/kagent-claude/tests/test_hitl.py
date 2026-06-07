@@ -1,8 +1,7 @@
 """Tests for HITL bridge and executor HITL integration."""
 
 import asyncio
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
