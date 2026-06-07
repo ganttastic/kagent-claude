@@ -14,9 +14,7 @@ from kagent.claude._hitl import (
     make_can_use_tool_callback,
 )
 from kagent.core.a2a import (
-    A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY,
     A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
-    A2A_DATA_PART_METADATA_TYPE_KEY,
     KAGENT_HITL_DECISION_TYPE_APPROVE,
     KAGENT_HITL_DECISION_TYPE_BATCH,
     KAGENT_HITL_DECISION_TYPE_KEY,

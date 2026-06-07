@@ -13,7 +13,6 @@ dashboard can display real-time agent activity.
 """
 
 import hashlib
-import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,8 +23,6 @@ from kagent.core.a2a import (
     A2A_DATA_PART_METADATA_TYPE_KEY,
     get_kagent_metadata_key,
 )
-
-logger = logging.getLogger(__name__)
 
 # Metadata type for tool results (matching langgraph's convention)
 A2A_DATA_PART_METADATA_TYPE_FUNCTION_RESPONSE = "function_response"
