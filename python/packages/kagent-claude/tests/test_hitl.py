@@ -120,8 +120,8 @@ class TestBuildConfirmationParts:
 
     def test_metadata_structure(self):
         meta = build_confirmation_metadata()
-        assert meta[A2A_DATA_PART_METADATA_TYPE_KEY] == A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL
-        assert meta[A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY] is True
+        assert meta["kagent_type"] == A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL
+        assert meta["kagent_is_long_running"] is True
 
 
 class TestExtractDecision:

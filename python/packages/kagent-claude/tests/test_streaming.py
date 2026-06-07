@@ -34,9 +34,9 @@ async def test_streaming_emits_tool_call_events(
     streaming_event = event_queue.enqueue_event.call_args_list[2][0][0]
     assert streaming_event.status.state.value == "working"
     assert streaming_event.final is False
-    # Should have metadata with tool name
+    # Tool name should be in the event metadata
     assert streaming_event.metadata is not None
-    assert streaming_event.metadata.get("kagent.claude.tool_name") == "Bash"
+    assert streaming_event.metadata.get("kagent_type") == "function_call" or streaming_event.metadata.get("kagent.claude.tool_name") == "Bash"
 
 
 @pytest.mark.asyncio

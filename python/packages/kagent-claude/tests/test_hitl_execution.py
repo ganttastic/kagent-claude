@@ -48,7 +48,7 @@ async def test_hitl_emits_input_required_on_tool_approval(
     # Should have emitted input_required at some point
     events = [call[0][0] for call in event_queue.enqueue_event.call_args_list]
     states = [e.status.state.value for e in events if hasattr(e, "status")]
-    assert "input_required" in states
+    assert "input-required" in states
 
 
 @pytest.mark.asyncio
