@@ -31,10 +31,19 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install --system --pre -e "python/packages/kagent-claude[dev]"
+          uv pip install --system pip-audit
 
       - name: Lint with ruff
         run: |
           ruff check python/packages/kagent-claude/src/ python/packages/kagent-claude/tests/ examples/
+
+      - name: Type check with mypy
+        run: |
+          mypy python/packages/kagent-claude/src/kagent/claude/ --ignore-missing-imports --no-error-summary
+
+      - name: Security audit dependencies
+        run: |
+          pip-audit
 
       - name: Run tests
         run: |

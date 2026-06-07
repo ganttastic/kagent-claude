@@ -1,13 +1,10 @@
 """OpenTelemetry tracing for the Claude Agent SDK executor."""
 
-import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
-
-logger = logging.getLogger(__name__)
 
 TRACER_NAME = "kagent.claude"
 

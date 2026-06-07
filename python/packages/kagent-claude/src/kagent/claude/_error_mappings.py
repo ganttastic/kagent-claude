@@ -1,10 +1,7 @@
 """Error classification and user-friendly error messages for Claude Agent SDK errors."""
 
 import asyncio
-import logging
 from dataclasses import dataclass
-
-logger = logging.getLogger(__name__)
 
 # Claude Agent SDK specific error patterns
 _ANTHROPIC_RATE_LIMIT_PATTERNS = (
@@ -174,13 +171,4 @@ def classify_error(exception: Exception) -> ClassifiedError:
         detail=raw_detail,
         is_transient=False,
     )
-
-
-def get_error_metadata(classified: ClassifiedError) -> dict:
-    """Build structured error metadata for A2A event metadata."""
-    return {
-        "kagent.claude.error_type": classified.error_type,
-        "kagent.claude.error_detail": classified.detail,
-        "kagent.claude.error_transient": classified.is_transient,
-    }
 

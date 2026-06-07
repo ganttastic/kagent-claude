@@ -106,6 +106,19 @@ class ClaudeAgentExecutorConfig:
     The user can approve, deny, or modify tool inputs before execution."""
 
 
+@dataclass
+class _RequestRef:
+    """Atomic reference to the current request's event queue and context.
+
+    Swapped as a single object on HITL resume so the background query
+    task always sees a consistent pair — no race between two separate
+    attribute mutations.
+    """
+
+    event_queue: EventQueue
+    context: RequestContext
+
+
 class _RunningQuery:
     """Tracks a background Claude query that may be paused for HITL."""
 
@@ -116,10 +129,9 @@ class _RunningQuery:
         self.result_text: str = ""
         self.session_id: str | None = None
         self.error: Exception | None = None
-        # Event queue and context from the most recent request — used to
-        # stream auto-approved tool call events from the background task.
-        self.event_queue: EventQueue | None = None
-        self.context: RequestContext | None = None
+        # Atomic reference to the current request — swapped on HITL resume.
+        # The background task reads this; the resume path replaces it.
+        self.request_ref: _RequestRef | None = None
         # Accumulated tool call parts for the final artifact
         self.tool_parts: list[Part] = []
 
@@ -421,8 +433,7 @@ class ClaudeAgentExecutor(AgentExecutor):
             return
 
         rq = _RunningQuery()
-        rq.event_queue = event_queue
-        rq.context = context
+        rq.request_ref = _RequestRef(event_queue=event_queue, context=context)
         self._running_queries[context_id] = rq
 
         # Register the HITL notify event so the bridge can wake us without polling
@@ -596,10 +607,9 @@ class ClaudeAgentExecutor(AgentExecutor):
             await self._emit_failed(context, event_queue, "No running query to resume")
             return
 
-        # Update the event queue reference for this resume request —
-        # auto-approved tool calls will stream via this queue.
-        rq.event_queue = event_queue
-        rq.context = context
+        # Atomically swap the request reference for this resume —
+        # the background task reads rq.request_ref as a single object.
+        rq.request_ref = _RequestRef(event_queue=event_queue, context=context)
 
         # Clear the HITL event before re-entering the wait loop.
         # The event was set by the bridge when the approval was created;
@@ -810,10 +820,11 @@ class ClaudeAgentExecutor(AgentExecutor):
                 if rq:
                     rq.tool_parts.append(tool_call_part)
                     # Emit informational tool call event to the dashboard
-                    if rq.event_queue and rq.context:
+                    ref = rq.request_ref
+                    if ref:
                         try:
                             event = TaskStatusUpdateEvent(
-                                task_id=rq.context.task_id,
+                                task_id=ref.context.task_id,
                                 status=TaskStatus(
                                     state=TaskState.working,
                                     timestamp=datetime.now(timezone.utc).isoformat(),
@@ -826,7 +837,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                                 context_id=context_id,
                                 final=False,
                             )
-                            await rq.event_queue.enqueue_event(event)
+                            await ref.event_queue.enqueue_event(event)
                         except Exception:
                             # Don't fail the tool call if event emission fails
                             pass
@@ -880,10 +891,11 @@ class ClaudeAgentExecutor(AgentExecutor):
             rq = running_queries.get(context_id)
             if rq:
                 rq.tool_parts.append(tool_result_part)
-                if rq.event_queue and rq.context:
+                ref = rq.request_ref
+                if ref:
                     try:
                         event = TaskStatusUpdateEvent(
-                            task_id=rq.context.task_id,
+                            task_id=ref.context.task_id,
                             status=TaskStatus(
                                 state=TaskState.working,
                                 timestamp=datetime.now(timezone.utc).isoformat(),
@@ -896,7 +908,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                             context_id=context_id,
                             final=False,
                         )
-                        await rq.event_queue.enqueue_event(event)
+                        await ref.event_queue.enqueue_event(event)
                     except Exception:
                         pass
             return {}

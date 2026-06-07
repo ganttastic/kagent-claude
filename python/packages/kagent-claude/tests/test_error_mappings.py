@@ -2,7 +2,7 @@
 
 import asyncio
 
-from kagent.claude._error_mappings import classify_error, get_error_metadata
+from kagent.claude._error_mappings import classify_error
 
 
 def test_classify_rate_limit():
@@ -62,12 +62,3 @@ def test_classify_permission():
     classified = classify_error(error)
     assert classified.error_type == "permission"
     assert classified.is_transient is False
-
-
-def test_get_error_metadata_structure():
-    error = RuntimeError("rate_limit_error")
-    classified = classify_error(error)
-    meta = get_error_metadata(classified)
-    assert meta["kagent.claude.error_type"] == "rate_limit"
-    assert meta["kagent.claude.error_transient"] is True
-    assert "kagent.claude.error_detail" in meta

@@ -61,10 +61,9 @@ def test_build_returns_fastapi_app(mock_kagent_config, agent_card):
 
     assert isinstance(fastapi_app, FastAPI)
 
-    # Verify health and thread_dump routes are registered
+    # Verify health route is registered
     route_paths = [route.path for route in fastapi_app.routes]
     assert "/health" in route_paths
-    assert "/thread_dump" in route_paths
 
     # Verify the app has a title containing the agent name
     assert "test-agent" in fastapi_app.title

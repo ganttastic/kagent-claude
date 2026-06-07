@@ -1,6 +1,5 @@
 """Tests for HITL bridge and executor HITL integration."""
 
-import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,7 +10,6 @@ from kagent.claude._hitl import (
     build_confirmation_data_part,
     build_confirmation_metadata,
     extract_hitl_decision_from_message,
-    make_can_use_tool_callback,
 )
 from kagent.core.a2a import (
     A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
@@ -179,50 +177,6 @@ class TestExtractDecision:
 
     def test_none_message(self):
         assert extract_hitl_decision_from_message(None) is None
-
-
-@pytest.mark.asyncio
-async def test_can_use_tool_callback_approve():
-    """The callback pauses until resolved, then returns Allow."""
-    bridge = HitlBridge()
-    callback = await make_can_use_tool_callback(bridge, "ctx-1")
-
-    # Start the callback in a task (it will block on the future)
-    task = asyncio.create_task(
-        callback("Bash", {"command": "ls"}, MagicMock())
-    )
-
-    # Give it a moment to create the pending approval
-    await asyncio.sleep(0.01)
-    assert bridge.has_pending("ctx-1")
-
-    # Resolve it
-    bridge.resolve_all("ctx-1", ApprovalDecision(approved=True, updated_input={"command": "ls"}))
-
-    result = await task
-    # Should be PermissionResultAllow
-    assert hasattr(result, "updated_input")
-
-
-@pytest.mark.asyncio
-async def test_can_use_tool_callback_deny():
-    """The callback returns Deny when rejected."""
-    bridge = HitlBridge()
-    callback = await make_can_use_tool_callback(bridge, "ctx-1")
-
-    task = asyncio.create_task(
-        callback("Write", {"file_path": "/etc/shadow"}, MagicMock())
-    )
-    await asyncio.sleep(0.01)
-
-    bridge.resolve_all(
-        "ctx-1",
-        ApprovalDecision(approved=False, rejection_reason="Access denied"),
-    )
-
-    result = await task
-    assert hasattr(result, "message")
-    assert "Access denied" in result.message
 
 
 class TestExtractAskUserAnswers:

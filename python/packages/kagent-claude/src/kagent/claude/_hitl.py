@@ -19,8 +19,6 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 
-from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny
-
 from kagent.core.a2a import (
     A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY,
     A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
@@ -277,40 +275,6 @@ def extract_hitl_decision_from_message(message) -> tuple[str, dict[str, str], di
                         rejection_reasons = {"__all__": reason}
 
     return (decision_type, decisions, rejection_reasons)
-
-
-async def make_can_use_tool_callback(bridge: HitlBridge, context_id: str):
-    """
-    Factory that creates a `can_use_tool` callback wired to the HITL bridge.
-
-    The returned callback pauses Claude's execution by awaiting a Future,
-    which is resolved when the user responds via the A2A protocol.
-    """
-
-    async def can_use_tool(
-        tool_name: str, input_data: dict, context
-    ) -> PermissionResultAllow | PermissionResultDeny:
-        # Create a pending approval and wait for the user's decision
-        approval = bridge.create_approval(
-            context_id=context_id,
-            tool_name=tool_name,
-            tool_input=input_data,
-            tool_use_id=getattr(context, "tool_use_id", None),
-        )
-
-        # This await pauses Claude's execution until resolve is called
-        decision: ApprovalDecision = await approval.future
-
-        if decision.approved:
-            return PermissionResultAllow(
-                updated_input=decision.updated_input or input_data
-            )
-        else:
-            return PermissionResultDeny(
-                message=decision.rejection_reason or "User denied this action"
-            )
-
-    return can_use_tool
 
 
 def extract_ask_user_answers_text(message) -> str | None:

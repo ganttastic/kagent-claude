@@ -29,15 +29,6 @@ def _health_check(request: Request) -> PlainTextResponse:
     return PlainTextResponse("OK")
 
 
-def _thread_dump(request: Request) -> PlainTextResponse:
-    import tempfile
-
-    with tempfile.TemporaryFile(mode="w+") as tmp:
-        faulthandler.dump_traceback(file=tmp, all_threads=True)
-        tmp.seek(0)
-        return PlainTextResponse(tmp.read())
-
-
 class KAgentApp:
     """
     Builds an A2A-compliant HTTP server wrapping the Claude Agent SDK.
@@ -120,7 +111,6 @@ class KAgentApp:
                 logger.exception("Failed to configure tracing")
 
         app.add_route("/health", methods=["GET"], route=_health_check)
-        app.add_route("/thread_dump", methods=["GET"], route=_thread_dump)
         a2a_app.add_routes_to_app(app)
 
         return app
