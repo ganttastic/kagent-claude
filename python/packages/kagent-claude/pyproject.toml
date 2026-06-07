@@ -33,9 +33,6 @@ dev = [
 [project.scripts]
 kagent-claude-server = "kagent.claude.server:main"
 
-[tool.uv.sources]
-kagent-core = {workspace = true}
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/kagent"]
 
