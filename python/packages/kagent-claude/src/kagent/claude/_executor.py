@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from typing_extensions import override
-
 from a2a.server.agent_execution import AgentExecutor
 from a2a.server.agent_execution.context import RequestContext
 from a2a.server.events.event_queue import EventQueue
@@ -27,6 +25,7 @@ from a2a.types import (
 )
 from claude_agent_sdk import ClaudeAgentOptions, SystemMessage, query
 from claude_agent_sdk.types import HookMatcher
+from typing_extensions import override
 
 from kagent.core.a2a import (
     KAGENT_HITL_DECISION_TYPE_APPROVE,
