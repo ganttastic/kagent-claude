@@ -5,8 +5,12 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends git && \
     rm -rf /var/lib/apt/lists/*
 
+# Version is injected at build time from the git tag.
+# Needed because hatch-vcs can't detect version without .git directory.
+ARG VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION}
+
 # Copy the package source and install from local.
-# When published to PyPI, this can be replaced with: pip install kagent-claude
 COPY python/packages/kagent-claude /tmp/kagent-claude
 RUN pip install --no-cache-dir --pre /tmp/kagent-claude && \
     rm -rf /tmp/kagent-claude
