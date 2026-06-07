@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Golden image** (`ghcr.io/ganttastic/kagent-claude`) — fully env-configurable Claude agent server. Deploy to kagent with zero Python, zero Docker builds — just a YAML file.
-- `CLAUDE_MCP_SERVERS` env var for configuring MCP servers via JSON with `$VAR` interpolation against pod environment — secrets stay in Kubernetes Secrets
+- `CLAUDE_MCP_SERVERS` env var for configuring MCP servers via JSON with `$VAR` interpolation — secrets stay in Kubernetes Secrets. Supports both stdio (command/args) and remote HTTP/SSE (type/url/headers) transports.
+- `CLAUDE_ALLOWED_MCP_TOOLS` env var for controlling which MCP tools are auto-approved. Defaults to wildcard for all configured servers.
+- `CLAUDE_SKILLS` env var to enable Claude Agent SDK skill discovery from `.claude/skills/`. Mount skills via Kubernetes ConfigMap at `/app/.claude/skills/<name>/SKILL.md`.
+- `CLAUDE_SKILLS_FILTER` env var to enable only specific skills by name.
+- `CLAUDE_CWD` env var to set the working directory for skill discovery.
 - `kagent-claude-server` console script and `kagent.claude.server` module for the golden image entrypoint
 - `server.py` module with `build_app()` for env-var-driven configuration
 - `Dockerfile` at repo root for building the golden image
+- `.dockerignore` for clean build context
 - `examples/agent-hitl.yaml` — zero-code HITL agent CRD
-- GitHub Actions CI now builds and pushes the golden image to GHCR on main/tags
+- GitHub Actions CI: lint + test on PR, build and push golden image to GHCR on main/tags
 - `SessionStore` protocol for pluggable session persistence (Redis, database, etc.)
 - LRU eviction on `ClaudeSessionStore` (default 1024 sessions) to prevent unbounded memory growth
 - Max concurrent HITL queries guard (`MAX_CONCURRENT_HITL_QUERIES = 100`)
@@ -31,10 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Options copying uses `_public_attrs()` helper instead of raw `__dict__` spreading (filters out private attributes)
 - Error metadata keys normalized to `kagent.claude.*` namespace (was `kagent.*` in `_error_mappings.py`)
 - `__version__` sourced from `importlib.metadata` instead of hardcoded string
-- Upper-bound version pins (`<1.0.0`) removed from `a2a-sdk` and `kagent-core` dependencies to match ecosystem conventions
 
 ### Fixed
 - `import asyncio` moved to top of `_error_mappings.py` (was at bottom behind `# noqa: E402`)
+- `a2a-sdk` pinned to `<1.0.0` — v1.x breaks `kagent-core` compatibility (removed `A2AStarletteApplication`, renamed `DataPart`)
 
 ## [0.2.0] - 2026-06-01
 

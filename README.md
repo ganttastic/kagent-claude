@@ -23,29 +23,6 @@ Once deployed, your Claude agent is a first-class kagent citizen — visible in 
 
 The package wraps `ClaudeAgentOptions` in a `KAgentApp` class that builds an [A2A-compliant](https://a2a-protocol.org) FastAPI server. The `ClaudeAgentExecutor` translates between A2A message events and the Claude Agent SDK's async streaming interface.
 
-## Installation
-
-```bash
-# Install from GitHub (not yet published to PyPI)
-pip install "kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude"
-```
-
-Or add to your `requirements.txt`:
-
-```
-kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude
-```
-
-Or in `pyproject.toml` dependencies:
-
-```toml
-dependencies = [
-    "kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude",
-]
-```
-
-Requires Python 3.10+. The `claude-agent-sdk` and `kagent-core` dependencies are installed automatically.
-
 ## Quick Start
 
 ### Zero-Code Deployment (Recommended)
@@ -64,7 +41,7 @@ kubectl apply -f examples/agent.yaml
 
 The published golden image (`ghcr.io/ganttastic/kagent-claude`) is fully
 configurable via environment variables. Customize tools, system prompt,
-timeouts, and HITL directly in the Agent CRD:
+timeouts, HITL, MCP servers, and skills directly in the Agent CRD:
 
 ```yaml
 apiVersion: kagent.dev/v1alpha2
@@ -85,10 +62,12 @@ spec:
               name: kagent-anthropic
               key: ANTHROPIC_API_KEY
         - name: CLAUDE_TOOLS
-          value: "Bash,Read,Write,Edit,Glob,Grep"
+          value: "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch"
         - name: CLAUDE_SYSTEM_PROMPT
           value: "You are a senior engineer. Explain your reasoning."
-        - name: CLAUDE_HITL
+        - name: CLAUDE_MCP_SERVERS
+          value: '{"fetch": {"type": "http", "url": "http://mcp-server/mcp"}}'
+        - name: CLAUDE_SKILLS
           value: "true"
 ```
 
@@ -383,9 +362,10 @@ The kagent controller creates the Deployment and Service automatically. The
 by the controller. See [`examples/README.md`](examples/README.md) for the
 full env var reference.
 
-### Custom Image (for MCP servers, hooks, etc.)
+### Custom Image (for hooks, custom session stores, etc.)
 
-If you need features the golden image can't express, write a Python
+If you need features the golden image can't express (custom hooks,
+custom session stores, complex startup logic), write a Python
 entrypoint and build a custom image:
 
 ```dockerfile
@@ -480,12 +460,13 @@ curl -X POST http://localhost:8080/ \
   }'
 ```
 
-## Limitations (v0.2)
+## Limitations
 
 - **No cancellation** — `cancel()` raises `NotImplementedError` (Claude Agent SDK has no cancellation API)
-- **In-memory sessions** — Session store resets on pod restart
+- **In-memory sessions** — Session store uses LRU eviction (1024 sessions); resets on pod restart. Implement `SessionStore` protocol for persistence.
 - **In-memory HITL state** — Pending approvals are lost on pod restart
 - **No push notifications** — `tasks/pushNotificationConfig` not supported
+- **Skills require ConfigMap mount** — Claude SDK skills can't be defined via env vars alone; they need filesystem artifacts mounted into the container
 
 ## Related
 

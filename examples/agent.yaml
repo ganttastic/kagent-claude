@@ -31,11 +31,22 @@ spec:
 
         # --- Claude SDK options ---
         - name: CLAUDE_TOOLS
-          value: "Bash,Read,Write,Edit,Glob,Grep"
+          value: "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch"
         # - name: CLAUDE_SYSTEM_PROMPT
         #   value: "You are a senior engineer. Explain your reasoning."
         # - name: CLAUDE_MAX_TURNS
         #   value: "25"
+
+        # --- MCP servers (optional) ---
+        # Stdio:  {"name": {"command": "npx", "args": ["@org/server"]}}
+        # HTTP:   {"name": {"type": "http", "url": "http://server/mcp"}}
+        # - name: CLAUDE_MCP_SERVERS
+        #   value: '{"fetch": {"type": "http", "url": "http://mcp-server/mcp"}}'
+
+        # --- Skills (optional) ---
+        # Mount SKILL.md files via ConfigMap, then enable:
+        # - name: CLAUDE_SKILLS
+        #   value: "true"
 
         # --- Executor options ---
         # - name: CLAUDE_TIMEOUT

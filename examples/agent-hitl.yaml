@@ -39,7 +39,7 @@ spec:
 
         # Restrict tools to read-only by default
         - name: CLAUDE_TOOLS
-          value: "Bash,Read,Glob,Grep"
+          value: "Bash,Read,Glob,Grep,WebFetch,WebSearch"
 
         - name: CLAUDE_SYSTEM_PROMPT
           value: "You are a careful engineer. Always explain what you plan to do and why before taking action."
@@ -48,3 +48,11 @@ spec:
           value: "claude-hitl-agent"
         - name: AGENT_DESCRIPTION
           value: "Claude agent with human approval for all tool use"
+
+        # --- MCP servers (optional) ---
+        # - name: CLAUDE_MCP_SERVERS
+        #   value: '{"fetch": {"type": "http", "url": "http://mcp-server/mcp"}}'
+
+        # --- Skills (optional) ---
+        # - name: CLAUDE_SKILLS
+        #   value: "true"
