@@ -63,13 +63,20 @@ def streaming_metadata(
     message_type: str,
     tool_name: str | None = None,
 ) -> dict[str, Any]:
-    """Build metadata for streaming intermediate events."""
+    """Build metadata for streaming intermediate events.
+
+    When tool_name is set, includes ``kagent_type: "function_call"`` so the
+    kagent dashboard renders the tool call card (informational, no approval).
+    Does NOT include ``kagent_is_long_running`` — that's only for HITL approvals.
+    """
     meta: dict[str, Any] = {
         f"{_PREFIX}.message_index": message_index,
         f"{_PREFIX}.message_type": message_type,
     }
     if tool_name:
         meta[f"{_PREFIX}.tool_name"] = tool_name
+        # Dashboard keys for rendering tool call cards
+        meta["kagent_type"] = "function_call"
     return meta
 
 

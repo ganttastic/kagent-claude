@@ -115,6 +115,12 @@ class _RunningQuery:
         self.result_text: str = ""
         self.session_id: str | None = None
         self.error: Exception | None = None
+        # Event queue and context from the most recent request — used to
+        # stream auto-approved tool call events from the background task.
+        self.event_queue: EventQueue | None = None
+        self.context: RequestContext | None = None
+        # Accumulated tool call parts for the final artifact
+        self.tool_parts: list[Part] = []
 
 
 class ClaudeAgentExecutor(AgentExecutor):
@@ -415,6 +421,8 @@ class ClaudeAgentExecutor(AgentExecutor):
             return
 
         rq = _RunningQuery()
+        rq.event_queue = event_queue
+        rq.context = context
         self._running_queries[context_id] = rq
 
         # Register the HITL notify event so the bridge can wake us without polling
@@ -533,7 +541,9 @@ class ClaudeAgentExecutor(AgentExecutor):
         else:
             if rq.session_id and context_id:
                 self.session_store.set(context_id, rq.session_id)
-            await self._emit_completed(context, event_queue, rq.result_text)
+            await self._emit_completed(
+                context, event_queue, rq.result_text, tool_parts=rq.tool_parts
+            )
 
     def _is_hitl_resume(self, context: RequestContext) -> bool:
         """Check if this execute() call is a HITL response to a pending approval."""
@@ -585,6 +595,11 @@ class ClaudeAgentExecutor(AgentExecutor):
         if not rq:
             await self._emit_failed(context, event_queue, "No running query to resume")
             return
+
+        # Update the event queue reference for this resume request —
+        # auto-approved tool calls will stream via this queue.
+        rq.event_queue = event_queue
+        rq.context = context
 
         # Clear the HITL event before re-entering the wait loop.
         # The event was set by the bridge when the approval was created;
@@ -647,8 +662,20 @@ class ClaudeAgentExecutor(AgentExecutor):
         event_queue: EventQueue,
         text: str,
         metadata: dict[str, Any] | None = None,
+        tool_parts: list[Part] | None = None,
     ) -> None:
-        """Emit artifact + completed status."""
+        """Emit artifact + completed status.
+
+        The artifact includes tool call/result DataParts (if any) followed
+        by the final text. This enables the dashboard to show the full turn
+        history on page refresh.
+        """
+        # Build artifact parts: tool history + final text
+        parts: list[Part] = []
+        if tool_parts:
+            parts.extend(tool_parts)
+        parts.append(Part(TextPart(text=text)))
+
         await event_queue.enqueue_event(
             TaskArtifactUpdateEvent(
                 task_id=context.task_id,
@@ -656,7 +683,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                 context_id=context.context_id,
                 artifact=Artifact(
                     artifact_id=str(uuid.uuid4()),
-                    parts=[Part(TextPart(text=text))],
+                    parts=parts,
                 ),
             )
         )
@@ -751,14 +778,62 @@ class ClaudeAgentExecutor(AgentExecutor):
         The hook creates a pending approval on the bridge, awaits the user's
         decision Future, and returns {"decision": "approve"} or
         {"decision": "block", "reason": "..."} to the SDK.
+
+        Tools already in ``allowed_tools`` are auto-approved (no prompt).
+        Only tools NOT in the allowed list trigger the approval flow.
         """
         bridge = self._hitl_bridge
+        running_queries = self._running_queries
+        # Build the set of pre-approved tools for fast lookup
+        allowed = set(getattr(options, "allowed_tools", None) or [])
 
         async def _hitl_pre_tool_use(input_data, tool_use_id, hook_context):
             tool_name = input_data.get("tool_name", "unknown")
             tool_input = input_data.get("tool_input", {})
 
+            # Auto-approve tools that are already in allowed_tools
+            if tool_name in allowed:
+                logger.debug(f"HITL: auto-approving pre-approved tool {tool_name}")
+                # Build the tool call part
+                tool_call_part = Part(DataPart(
+                    data={
+                        "id": tool_use_id,
+                        "name": tool_name,
+                        "args": tool_input,
+                    },
+                    metadata={
+                        "kagent_type": "function_call",
+                    },
+                ))
+                # Accumulate for final artifact
+                rq = running_queries.get(context_id)
+                if rq:
+                    rq.tool_parts.append(tool_call_part)
+                    # Emit informational tool call event to the dashboard
+                    if rq.event_queue and rq.context:
+                        try:
+                            event = TaskStatusUpdateEvent(
+                                task_id=rq.context.task_id,
+                                status=TaskStatus(
+                                    state=TaskState.working,
+                                    timestamp=datetime.now(timezone.utc).isoformat(),
+                                    message=Message(
+                                        message_id=str(uuid.uuid4()),
+                                        role=Role.agent,
+                                        parts=[tool_call_part],
+                                    ),
+                                ),
+                                context_id=context_id,
+                                final=False,
+                            )
+                            await rq.event_queue.enqueue_event(event)
+                        except Exception:
+                            # Don't fail the tool call if event emission fails
+                            pass
+                return {"decision": "approve"}
+
             # Create approval and pause — the bridge signals the notify event
+            logger.info(f"HITL: requesting approval for tool {tool_name}")
             approval = bridge.create_approval(
                 context_id=context_id,
                 tool_name=tool_name,
@@ -777,12 +852,69 @@ class ClaudeAgentExecutor(AgentExecutor):
                     "reason": decision.rejection_reason or "User denied this action",
                 }
 
+        async def _post_tool_use(input_data, tool_use_id, hook_context):
+            """Emit tool result event to dashboard after tool execution."""
+            tool_name = input_data.get("tool_name", "unknown")
+            tool_response = input_data.get("tool_response", "")
+
+            # Format the response for display
+            if isinstance(tool_response, dict):
+                response_data = tool_response
+            elif isinstance(tool_response, str):
+                display = tool_response[:2000] + "..." if len(tool_response) > 2000 else tool_response
+                response_data = {"result": display}
+            else:
+                response_data = {"result": str(tool_response)[:2000]}
+
+            tool_result_part = Part(DataPart(
+                data={
+                    "id": tool_use_id,
+                    "name": tool_name,
+                    "response": response_data,
+                },
+                metadata={
+                    "kagent_type": "function_response",
+                },
+            ))
+
+            rq = running_queries.get(context_id)
+            if rq:
+                rq.tool_parts.append(tool_result_part)
+                if rq.event_queue and rq.context:
+                    try:
+                        event = TaskStatusUpdateEvent(
+                            task_id=rq.context.task_id,
+                            status=TaskStatus(
+                                state=TaskState.working,
+                                timestamp=datetime.now(timezone.utc).isoformat(),
+                                message=Message(
+                                    message_id=str(uuid.uuid4()),
+                                    role=Role.agent,
+                                    parts=[tool_result_part],
+                                ),
+                            ),
+                            context_id=context_id,
+                            final=False,
+                        )
+                        await rq.event_queue.enqueue_event(event)
+                    except Exception:
+                        pass
+            return {}
+
         existing_hooks = getattr(options, "hooks", None) or {}
         pre_tool_use = existing_hooks.get("PreToolUse", [])
         pre_tool_use = list(pre_tool_use) + [
             HookMatcher(matcher=None, hooks=[_hitl_pre_tool_use])
         ]
-        updated_hooks = {**existing_hooks, "PreToolUse": pre_tool_use}
+        post_tool_use = existing_hooks.get("PostToolUse", [])
+        post_tool_use = list(post_tool_use) + [
+            HookMatcher(matcher=None, hooks=[_post_tool_use])
+        ]
+        updated_hooks = {
+            **existing_hooks,
+            "PreToolUse": pre_tool_use,
+            "PostToolUse": post_tool_use,
+        }
 
         # Build new options with hooks (no can_use_tool needed)
         opts_dict = _public_attrs(options)

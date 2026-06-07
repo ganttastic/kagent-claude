@@ -22,6 +22,7 @@ from kagent.core.a2a import (
     A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY,
     A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
     A2A_DATA_PART_METADATA_TYPE_KEY,
+    get_kagent_metadata_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,14 +55,12 @@ def convert_assistant_message(message) -> list[Part] | None:
 
             data_part = DataPart(
                 data={
+                    "id": tool_id,
                     "name": tool_name,
                     "args": tool_input,
-                    "id": tool_id,
                 },
                 metadata={
-                    A2A_DATA_PART_METADATA_TYPE_KEY: A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
-                    "kagent.tool_name": tool_name,
-                    "kagent.tool_use_id": tool_id,
+                    get_kagent_metadata_key(A2A_DATA_PART_METADATA_TYPE_KEY): A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
                 },
             )
             parts.append(Part(data_part))
@@ -92,6 +91,7 @@ def convert_tool_result_message(message) -> list[Part] | None:
 
         if block_type == "tool_result":
             tool_use_id = getattr(block, "tool_use_id", "")
+            tool_name = getattr(block, "name", None) or "tool_result"
             result_content = getattr(block, "content", "")
 
             # Result content can be a string or a list of content blocks
@@ -109,14 +109,12 @@ def convert_tool_result_message(message) -> list[Part] | None:
 
             data_part = DataPart(
                 data={
-                    "name": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "output": display_text,
-                    "is_error": getattr(block, "is_error", False),
+                    "id": tool_use_id,
+                    "name": tool_name,
+                    "response": {"result": display_text},
                 },
                 metadata={
-                    A2A_DATA_PART_METADATA_TYPE_KEY: A2A_DATA_PART_METADATA_TYPE_FUNCTION_RESPONSE,
-                    "kagent.tool_use_id": tool_use_id,
+                    get_kagent_metadata_key(A2A_DATA_PART_METADATA_TYPE_KEY): A2A_DATA_PART_METADATA_TYPE_FUNCTION_RESPONSE,
                 },
             )
             parts.append(Part(data_part))
