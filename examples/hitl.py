@@ -74,7 +74,7 @@ Test the HITL flow with curl:
 
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from claude_agent_sdk import ClaudeAgentOptions
-from kagent.claude import ClaudeExecutorConfig, KAgentApp
+from kagent.claude import ClaudeAgentExecutorConfig, KAgentApp
 from kagent.core import KAgentConfig
 
 app = KAgentApp(
@@ -98,7 +98,7 @@ app = KAgentApp(
             )
         ],
     ),
-    executor_config=ClaudeExecutorConfig(
+    executor_config=ClaudeAgentExecutorConfig(
         enable_hitl=True,
         execution_timeout=600.0,  # 10 min — HITL can take time
     ),

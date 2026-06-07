@@ -15,8 +15,8 @@ dependencies = [
   "pydantic>=2.0.0",
   "typing-extensions>=4.0.0",
   "uvicorn>=0.20.0",
-  "a2a-sdk[http-server]>=0.3.23,<1.0.0",
-  "kagent-core>=0.1.0,<1.0.0",
+  "a2a-sdk[http-server]>=0.3.23",
+  "kagent-core>=0.1.0",
   "opentelemetry-api>=1.38.0",
   "opentelemetry-sdk>=1.38.0",
   "openai>=1.0.0",
@@ -29,6 +29,9 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
+
+[project.scripts]
+kagent-claude-server = "kagent.claude.server:main"
 
 [tool.uv.sources]
 kagent-core = {workspace = true}

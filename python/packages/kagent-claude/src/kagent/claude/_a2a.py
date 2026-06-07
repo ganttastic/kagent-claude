@@ -18,7 +18,7 @@ from kagent.core.a2a import (
     get_a2a_max_content_length,
 )
 
-from ._executor import ClaudeAgentExecutor, ClaudeExecutorConfig
+from ._executor import ClaudeAgentExecutor, ClaudeAgentExecutorConfig
 from ._session_store import ClaudeSessionStore
 
 logger = logging.getLogger(__name__)
@@ -56,27 +56,15 @@ class KAgentApp:
         options: ClaudeAgentOptions,
         agent_card: AgentCard,
         config: KAgentConfig = None,
-        executor_config: ClaudeExecutorConfig | None = None,
+        executor_config: ClaudeAgentExecutorConfig | None = None,
         tracing: bool = True,
-        enable_hitl: bool = False,
     ):
         self._options = options
         self.agent_card = AgentCard.model_validate(agent_card)
         self.config = config or KAgentConfig()
         self._enable_tracing = tracing
         self._session_store = ClaudeSessionStore()
-
-        # Build executor config — prefer explicit config, fall back to legacy kwarg
-        if executor_config:
-            self._executor_config = executor_config
-        elif enable_hitl:
-            logger.warning(
-                "KAgentApp(enable_hitl=True) is deprecated. "
-                "Use executor_config=ClaudeExecutorConfig(enable_hitl=True) instead."
-            )
-            self._executor_config = ClaudeExecutorConfig(enable_hitl=enable_hitl)
-        else:
-            self._executor_config = ClaudeExecutorConfig()
+        self._executor_config = executor_config or ClaudeAgentExecutorConfig()
 
     def build(self) -> FastAPI:
         """Construct and return the FastAPI ASGI application."""

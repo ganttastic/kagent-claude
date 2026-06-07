@@ -1,5 +1,6 @@
 """Error classification and user-friendly error messages for Claude Agent SDK errors."""
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -178,11 +179,8 @@ def classify_error(exception: Exception) -> ClassifiedError:
 def get_error_metadata(classified: ClassifiedError) -> dict:
     """Build structured error metadata for A2A event metadata."""
     return {
-        "kagent.error_type": classified.error_type,
-        "kagent.error_detail": classified.detail,
-        "kagent.error_transient": classified.is_transient,
+        "kagent.claude.error_type": classified.error_type,
+        "kagent.claude.error_detail": classified.detail,
+        "kagent.claude.error_transient": classified.is_transient,
     }
 
-
-# Required for asyncio.TimeoutError reference
-import asyncio  # noqa: E402

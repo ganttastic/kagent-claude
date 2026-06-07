@@ -62,7 +62,7 @@ from ._metadata_utils import (
     execution_metadata,
     streaming_metadata,
 )
-from ._session_store import ClaudeSessionStore
+from ._session_store import ClaudeSessionStore, SessionStore
 from ._tracing import record_completion, record_message_event, trace_query
 
 logger = logging.getLogger(__name__)
@@ -70,9 +70,13 @@ logger = logging.getLogger(__name__)
 # Default execution timeout (seconds) — matches reference adapters
 DEFAULT_EXECUTION_TIMEOUT = 300.0
 
+# Maximum concurrent HITL queries per executor instance.
+# Prevents unbounded memory growth from unresolved HITL requests.
+MAX_CONCURRENT_HITL_QUERIES = 100
+
 
 @dataclass
-class ClaudeExecutorConfig:
+class ClaudeAgentExecutorConfig:
     """
     Runtime behavior configuration for the Claude executor.
 
@@ -80,7 +84,7 @@ class ClaudeExecutorConfig:
     failure modes. Pass to KAgentApp via the `executor_config` parameter.
 
     Example:
-        config = ClaudeExecutorConfig(
+        config = ClaudeAgentExecutorConfig(
             execution_timeout=600.0,   # 10 minutes for long tasks
             enable_streaming=True,     # show tool calls in dashboard
             enable_hitl=True,          # require approval for tool use
@@ -131,22 +135,15 @@ class ClaudeAgentExecutor(AgentExecutor):
         self,
         *,
         options: ClaudeAgentOptions,
-        session_store: ClaudeSessionStore,
+        session_store: SessionStore,
         app_name: str = "kagent-claude",
-        config: ClaudeExecutorConfig | None = None,
-        # Legacy kwargs for backward compatibility
-        enable_hitl: bool = False,
+        config: ClaudeAgentExecutorConfig | None = None,
     ):
         super().__init__()
         self.options = options
-        self.session_store = session_store
+        self.session_store: SessionStore = session_store
         self.app_name = app_name
-
-        # Merge config with legacy kwargs
-        if config:
-            self._config = config
-        else:
-            self._config = ClaudeExecutorConfig(enable_hitl=enable_hitl)
+        self._config = config or ClaudeAgentExecutorConfig()
 
         self._hitl_bridge = HitlBridge()
         # context_id -> running query (for HITL resume)
@@ -154,14 +151,10 @@ class ClaudeAgentExecutor(AgentExecutor):
 
     @override
     async def cancel(self, context: RequestContext, event_queue: EventQueue):
-        # Cancel any running query for this context
-        context_id = context.context_id
-        if context_id and context_id in self._running_queries:
-            rq = self._running_queries.pop(context_id)
-            if rq.task and not rq.task.done():
-                rq.task.cancel()
-            self._hitl_bridge.cancel_all(context_id)
-        raise NotImplementedError("Cancellation is not supported by the Claude Agent SDK executor.")
+        raise NotImplementedError(
+            "Cancellation is not supported by the Claude Agent SDK. "
+            "Use shutdown() for graceful cleanup of all running queries."
+        )
 
     @override
     async def execute(
@@ -411,8 +404,21 @@ class ClaudeAgentExecutor(AgentExecutor):
         task stays paused until the next execute() call resolves the approval.
         """
         context_id = context.context_id
+
+        # SEC-4: Guard against unbounded concurrent HITL queries
+        if len(self._running_queries) >= MAX_CONCURRENT_HITL_QUERIES:
+            await self._emit_failed(
+                context, event_queue,
+                f"Too many concurrent HITL queries (limit: {MAX_CONCURRENT_HITL_QUERIES}). "
+                "Please resolve or cancel pending approvals before starting new queries.",
+            )
+            return
+
         rq = _RunningQuery()
         self._running_queries[context_id] = rq
+
+        # Register the HITL notify event so the bridge can wake us without polling
+        self._hitl_bridge.register_notify_event(context_id, rq.hitl_event)
 
         # Create the can_use_tool callback wired to our bridge
         can_use_tool = await make_can_use_tool_callback(self._hitl_bridge, context_id)
@@ -478,23 +484,48 @@ class ClaudeAgentExecutor(AgentExecutor):
         context: RequestContext,
         event_queue: EventQueue,
     ) -> None:
-        """Poll until query completes or HITL is needed."""
-        while True:
-            if rq.completed_event.is_set():
-                break
-            if self._hitl_bridge.has_pending(context_id):
+        """Wait until the query completes or HITL input is needed.
+
+        Uses ``asyncio.wait()`` on the background task and the HITL notify
+        event instead of polling, so we wake up only when something actually
+        happens.
+        """
+
+        async def _wait_for_hitl():
+            """Coroutine that completes when the HITL bridge needs input."""
+            await rq.hitl_event.wait()
+
+        hitl_waiter = asyncio.ensure_future(_wait_for_hitl())
+        try:
+            # Wait for whichever fires first: query done or HITL needed
+            done, _pending = await asyncio.wait(
+                [rq.task, hitl_waiter],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if hitl_waiter in done:
                 # Claude is paused waiting for approval — emit input_required
                 await self._emit_input_required(context, event_queue)
-                # Return control — the next execute() will resume
+                # Reset the event for the next round of HITL
+                rq.hitl_event.clear()
+                # Return control — the next execute() call will resume
                 return
-            # Brief sleep to avoid busy-waiting
-            await asyncio.sleep(0.05)
-            if rq.task.done():
-                rq.completed_event.set()
-                break
+
+            # The query task finished (hitl_waiter was not in done)
+            # Ensure completed_event is set so callers see it
+            rq.completed_event.set()
+        finally:
+            # Clean up the hitl_waiter if it's still pending
+            if not hitl_waiter.done():
+                hitl_waiter.cancel()
+                try:
+                    await hitl_waiter
+                except asyncio.CancelledError:
+                    pass
 
         # Query completed without HITL interruption
         self._running_queries.pop(context_id, None)
+        self._hitl_bridge.unregister_notify_event(context_id)
 
         if rq.error:
             classified = classify_error(rq.error)
@@ -706,7 +737,7 @@ class ClaudeAgentExecutor(AgentExecutor):
         """Build ClaudeAgentOptions, injecting resume if resuming a session."""
         if claude_session_id:
             return ClaudeAgentOptions(
-                **{k: v for k, v in self.options.__dict__.items() if v is not None},
+                **_public_attrs(self.options),
                 resume=claude_session_id,
             )
         return self.options
@@ -731,7 +762,7 @@ class ClaudeAgentExecutor(AgentExecutor):
         updated_hooks = {**existing_hooks, "PreToolUse": pre_tool_use}
 
         # Build new options with can_use_tool and hooks
-        opts_dict = {k: v for k, v in options.__dict__.items() if v is not None}
+        opts_dict = _public_attrs(options)
         opts_dict["can_use_tool"] = can_use_tool
         opts_dict["hooks"] = updated_hooks
 
@@ -778,3 +809,12 @@ def _build_span_attributes(context: RequestContext) -> dict[str, Any]:
     if context.task_id:
         attrs["gen_ai.task.id"] = context.task_id
     return attrs
+
+
+def _public_attrs(obj: object) -> dict[str, Any]:
+    """Extract public (non-underscore-prefixed) attributes with non-None values.
+
+    Used instead of raw ``obj.__dict__`` spreading to avoid leaking internal
+    state when constructing new ``ClaudeAgentOptions`` instances.
+    """
+    return {k: v for k, v in obj.__dict__.items() if not k.startswith("_") and v is not None}

@@ -76,6 +76,16 @@ class HitlBridge:
     def __init__(self):
         # context_id -> list of pending approvals
         self._pending: dict[str, list[PendingApproval]] = {}
+        # context_id -> event signalled when a new approval is created
+        self._notify_events: dict[str, asyncio.Event] = {}
+
+    def register_notify_event(self, context_id: str, event: asyncio.Event) -> None:
+        """Register an event to be set when a new approval is created for this context."""
+        self._notify_events[context_id] = event
+
+    def unregister_notify_event(self, context_id: str) -> None:
+        """Remove the notification event for a context."""
+        self._notify_events.pop(context_id, None)
 
     def has_pending(self, context_id: str) -> bool:
         """Check if there are unresolved approvals for this context."""
@@ -112,6 +122,12 @@ class HitlBridge:
             f"Created pending approval {approval.confirmation_id} "
             f"for tool {tool_name} in context {context_id}"
         )
+
+        # Signal the executor that HITL input is needed
+        notify = self._notify_events.get(context_id)
+        if notify:
+            notify.set()
+
         return approval
 
     def resolve_all(self, context_id: str, decision: ApprovalDecision) -> None:
@@ -164,6 +180,7 @@ class HitlBridge:
         for approval in pending:
             if not approval.future.done():
                 approval.future.cancel()
+        self.unregister_notify_event(context_id)
 
 
 def build_confirmation_data_part(approval: PendingApproval) -> dict:

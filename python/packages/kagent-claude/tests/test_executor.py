@@ -1,186 +1,97 @@
 """Tests for ClaudeAgentExecutor."""
 
 import asyncio
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from a2a.types import Message, Role, TextPart
 
-from kagent.claude._executor import ClaudeAgentExecutor, ClaudeExecutorConfig
-from kagent.claude._session_store import ClaudeSessionStore
+from kagent.claude._executor import ClaudeAgentExecutor, ClaudeAgentExecutorConfig, _RunningQuery
 
-
-@pytest.fixture
-def session_store():
-    return ClaudeSessionStore()
-
-
-@pytest.fixture
-def executor(session_store):
-    options = MagicMock()
-    options.__dict__ = {"allowed_tools": ["Bash"]}
-    return ClaudeAgentExecutor(
-        options=options,
-        session_store=session_store,
-        app_name="test-agent",
-        config=ClaudeExecutorConfig(enable_streaming=False),
-    )
-
-
-@pytest.fixture
-def event_queue():
-    queue = AsyncMock()
-    queue.enqueue_event = AsyncMock()
-    return queue
-
-
-@pytest.fixture
-def request_context():
-    ctx = MagicMock()
-    ctx.task_id = str(uuid.uuid4())
-    ctx.context_id = "test-context-id"
-    ctx.current_task = None
-    # Use a real A2A Message so Pydantic validation passes
-    ctx.message = Message(
-        message_id="msg-test-001",
-        role=Role.user,
-        parts=[TextPart(text="Hello Claude")],
-    )
-    ctx.get_user_input = MagicMock(return_value="Hello Claude")
-    ctx.call_context = None
-    return ctx
-
-
-class MockSystemMessage:
-    """Mock Claude SDK SystemMessage with init subtype."""
-
-    def __init__(self, session_id: str):
-        self.subtype = "init"
-        self.data = {"session_id": session_id}
-
-
-class MockResultMessage:
-    """Mock Claude SDK ResultMessage with result text."""
-
-    def __init__(self, result: str = ""):
-        self.result = result
-
-
-async def _async_iter(items):
-    for item in items:
-        yield item
+from .conftest import MockResultMessage, MockSystemMessage, async_iter, make_executor
 
 
 @pytest.mark.asyncio
-async def test_execute_streams_and_completes(executor, event_queue, request_context):
+async def test_execute_streams_and_completes(executor, event_queue, request_context, patch_executor_deps):
     """Successful execution emits submitted, working, artifact, completed."""
-    messages = [
-        MockSystemMessage(session_id="sess-123"),
-        MockResultMessage(result="Hello world"),
-    ]
+    mock_query = patch_executor_deps
+    messages = [MockSystemMessage(session_id="sess-123"), MockResultMessage(result="Hello world")]
+    mock_query.return_value = async_iter(messages)
 
-    with patch("kagent.claude._executor.query", return_value=_async_iter(messages)):
-        with patch("kagent.claude._executor.SystemMessage", MockSystemMessage):
-            with patch("kagent.claude._executor.set_kagent_span_attributes", return_value=None):
-                with patch("kagent.claude._executor.clear_kagent_span_attributes"):
-                    await executor.execute(request_context, event_queue)
+    await executor.execute(request_context, event_queue)
 
     # Should have: submitted, working, artifact, completed = 4 events
     assert event_queue.enqueue_event.call_count == 4
-
-    # Last event should be final=True with completed state
-    last_call = event_queue.enqueue_event.call_args_list[-1]
-    last_event = last_call[0][0]
+    last_event = event_queue.enqueue_event.call_args_list[-1][0][0]
     assert last_event.final is True
 
 
 @pytest.mark.asyncio
-async def test_execute_persists_session_id(executor, event_queue, request_context, session_store):
+async def test_execute_persists_session_id(
+    executor, event_queue, request_context, session_store, patch_executor_deps
+):
     """Session ID from Claude SDK is stored for future turns."""
+    mock_query = patch_executor_deps
     messages = [MockSystemMessage(session_id="new-sess-456"), MockResultMessage(result="Hi")]
+    mock_query.return_value = async_iter(messages)
 
-    with patch("kagent.claude._executor.query", return_value=_async_iter(messages)):
-        with patch("kagent.claude._executor.SystemMessage", MockSystemMessage):
-            with patch("kagent.claude._executor.set_kagent_span_attributes", return_value=None):
-                with patch("kagent.claude._executor.clear_kagent_span_attributes"):
-                    await executor.execute(request_context, event_queue)
+    await executor.execute(request_context, event_queue)
 
     assert session_store.get("test-context-id") == "new-sess-456"
 
 
 @pytest.mark.asyncio
-async def test_execute_resumes_with_existing_session(executor, event_queue, request_context, session_store):
+async def test_execute_resumes_with_existing_session(
+    executor, event_queue, request_context, session_store, patch_executor_deps
+):
     """When a session exists for the context, resume is set in options."""
+    mock_query = patch_executor_deps
     session_store.set("test-context-id", "existing-sess")
     messages = [MockResultMessage(result="Resumed")]
+    mock_query.return_value = async_iter(messages)
 
-    with patch("kagent.claude._executor.query", return_value=_async_iter(messages)) as mock_query:
-        with patch("kagent.claude._executor.ClaudeAgentOptions") as mock_opts_cls:
-            mock_opts_cls.return_value = MagicMock()
-            with patch("kagent.claude._executor.SystemMessage", MockSystemMessage):
-                with patch("kagent.claude._executor.set_kagent_span_attributes", return_value=None):
-                    with patch("kagent.claude._executor.clear_kagent_span_attributes"):
-                        await executor.execute(request_context, event_queue)
+    with patch("kagent.claude._executor.ClaudeAgentOptions") as mock_opts_cls:
+        mock_opts_cls.return_value = MagicMock()
+        await executor.execute(request_context, event_queue)
 
-    # Verify ClaudeAgentOptions was called with resume
     mock_opts_cls.assert_called_once()
-    call_kwargs = mock_opts_cls.call_args[1]
-    assert call_kwargs["resume"] == "existing-sess"
+    assert mock_opts_cls.call_args[1]["resume"] == "existing-sess"
 
 
 @pytest.mark.asyncio
-async def test_execute_handles_exception(executor, event_queue, request_context):
+async def test_execute_handles_exception(executor, event_queue, request_context, patch_executor_deps):
     """Exception during query() emits a failed status event with classified error."""
+    mock_query = patch_executor_deps
 
     async def _failing_iter():
         raise RuntimeError("Claude SDK error")
         yield  # noqa: unreachable — makes this an async generator
 
-    with patch("kagent.claude._executor.query", return_value=_failing_iter()):
-        with patch("kagent.claude._executor.SystemMessage", MockSystemMessage):
-            with patch("kagent.claude._executor.set_kagent_span_attributes", return_value=None):
-                with patch("kagent.claude._executor.clear_kagent_span_attributes"):
-                    await executor.execute(request_context, event_queue)
+    mock_query.return_value = _failing_iter()
 
-    # Last event should be failed
-    last_call = event_queue.enqueue_event.call_args_list[-1]
-    last_event = last_call[0][0]
+    await executor.execute(request_context, event_queue)
+
+    last_event = event_queue.enqueue_event.call_args_list[-1][0][0]
     assert last_event.final is True
     assert last_event.status.state.value == "failed"
-    # Should have error metadata
     assert last_event.metadata is not None
     assert "kagent.claude.error_type" in last_event.metadata
 
 
 @pytest.mark.asyncio
-async def test_execute_handles_timeout(event_queue, request_context, session_store):
+async def test_execute_handles_timeout(event_queue, request_context, session_store, patch_executor_deps):
     """Timeout during query() emits a failed status event."""
-    options = MagicMock()
-    options.__dict__ = {"allowed_tools": ["Bash"]}
-    executor = ClaudeAgentExecutor(
-        options=options,
-        session_store=session_store,
-        app_name="test-agent",
-        config=ClaudeExecutorConfig(
-            execution_timeout=0.05,  # 50ms timeout
-            enable_streaming=False,
-        ),
-    )
+    mock_query = patch_executor_deps
+    executor = make_executor(session_store, execution_timeout=0.05, enable_streaming=False)
 
     async def _slow_iter():
-        await asyncio.sleep(5.0)  # will be interrupted by timeout
+        await asyncio.sleep(5.0)
         yield MockResultMessage(result="too late")
 
-    with patch("kagent.claude._executor.query", return_value=_slow_iter()):
-        with patch("kagent.claude._executor.SystemMessage", MockSystemMessage):
-            with patch("kagent.claude._executor.set_kagent_span_attributes", return_value=None):
-                with patch("kagent.claude._executor.clear_kagent_span_attributes"):
-                    await executor.execute(request_context, event_queue)
+    mock_query.return_value = _slow_iter()
 
-    # Last event should be failed with timeout type
-    last_call = event_queue.enqueue_event.call_args_list[-1]
-    last_event = last_call[0][0]
+    await executor.execute(request_context, event_queue)
+
+    last_event = event_queue.enqueue_event.call_args_list[-1][0][0]
     assert last_event.final is True
     assert last_event.status.state.value == "failed"
     assert last_event.metadata["kagent.claude.error_type"] == "timeout"
@@ -188,7 +99,7 @@ async def test_execute_handles_timeout(event_queue, request_context, session_sto
 
 @pytest.mark.asyncio
 async def test_cancel_raises(executor, event_queue, request_context):
-    """cancel() raises NotImplementedError."""
+    """cancel() raises NotImplementedError without side effects."""
     with pytest.raises(NotImplementedError):
         await executor.cancel(request_context, event_queue)
 
@@ -196,23 +107,35 @@ async def test_cancel_raises(executor, event_queue, request_context):
 @pytest.mark.asyncio
 async def test_shutdown_cancels_running_queries(session_store):
     """shutdown() cancels all running queries."""
-    options = MagicMock()
-    options.__dict__ = {"allowed_tools": ["Bash"]}
-    executor = ClaudeAgentExecutor(
-        options=options,
-        session_store=session_store,
-        app_name="test-agent",
-    )
-    # Simulate a running query
-    from kagent.claude._executor import _RunningQuery
+    executor = make_executor(session_store)
 
     rq = _RunningQuery()
     rq.task = asyncio.create_task(asyncio.sleep(100))
     executor._running_queries["ctx-1"] = rq
 
     await executor.shutdown()
-    # Let cancellation propagate
     await asyncio.sleep(0)
 
     assert rq.task.cancelled()
     assert "ctx-1" not in executor._running_queries
+
+
+@pytest.mark.asyncio
+async def test_max_concurrent_hitl_queries(event_queue, request_context, session_store, patch_executor_deps):
+    """HITL execution is rejected when max concurrent queries is exceeded."""
+    mock_query = patch_executor_deps
+    executor = make_executor(session_store, enable_hitl=True, enable_streaming=False)
+
+    # Fill up the running queries dict
+    from kagent.claude._executor import MAX_CONCURRENT_HITL_QUERIES
+
+    for i in range(MAX_CONCURRENT_HITL_QUERIES):
+        rq = _RunningQuery()
+        executor._running_queries[f"ctx-{i}"] = rq
+
+    await executor.execute(request_context, event_queue)
+
+    # Should emit a failed event, not start a new query
+    last_event = event_queue.enqueue_event.call_args_list[-1][0][0]
+    assert last_event.status.state.value == "failed"
+    assert "Too many concurrent" in last_event.status.message.parts[0].root.text

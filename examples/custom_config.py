@@ -1,8 +1,10 @@
 """
-Example: Custom configuration with timeout, streaming, and system prompt.
+Example: MCP server integration with custom system prompt.
 
-Demonstrates all ClaudeExecutorConfig options and ClaudeAgentOptions
-customization.
+This example shows the primary reason to write Python instead of using
+the golden image: MCP server configuration. MCP servers let Claude
+interact with external tools (databases, APIs, custom CLIs) that aren't
+part of the built-in tool set.
 
 Run locally:
     ANTHROPIC_API_KEY=sk-... KAGENT_URL=http://localhost:8083 \
@@ -12,36 +14,42 @@ Run locally:
 
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from claude_agent_sdk import ClaudeAgentOptions
-from kagent.claude import ClaudeExecutorConfig, KAgentApp
+from kagent.claude import ClaudeAgentExecutorConfig, KAgentApp
 from kagent.core import KAgentConfig
 
 app = KAgentApp(
-    # Claude Agent SDK options — controls what Claude can do
     options=ClaudeAgentOptions(
-        # Tools the agent can use (from the Claude Agent SDK tool set)
+        # Built-in tools
         allowed_tools=["Bash", "Read", "Glob", "Grep", "WebFetch"],
-        # System prompt — instructs Claude's behavior
+        # System prompt — controls Claude's behavior
         system_prompt=(
             "You are a senior infrastructure engineer. "
             "Always explain your reasoning before taking action. "
             "Prefer read-only operations unless the user explicitly asks for changes."
         ),
-        # Max turns before Claude stops (prevents runaway loops)
         max_turns=20,
+        # MCP servers — this is why you'd write code instead of using env vars.
+        # Each server is a subprocess that Claude can call as a tool.
+        # mcp_servers={
+        #     "postgres": {
+        #         "command": "npx",
+        #         "args": ["@modelcontextprotocol/server-postgres", "postgresql://..."],
+        #     },
+        #     "github": {
+        #         "command": "npx",
+        #         "args": ["@modelcontextprotocol/server-github"],
+        #         "env": {"GITHUB_TOKEN": os.environ["GITHUB_TOKEN"]},
+        #     },
+        # },
     ),
-    # Executor config — controls runtime behavior
-    executor_config=ClaudeExecutorConfig(
-        # Kill the query if it takes longer than 10 minutes
+    executor_config=ClaudeAgentExecutorConfig(
         execution_timeout=600.0,
-        # Stream tool calls/results to the dashboard in real-time
         enable_streaming=True,
-        # Don't require approval — tools in allowed_tools run automatically
         enable_hitl=False,
     ),
-    # Agent identity for A2A protocol
     agent_card=AgentCard(
         name="custom-agent",
-        description="Infrastructure research agent with custom timeouts",
+        description="Infrastructure research agent with MCP integration",
         url="http://localhost:8080/",
         version="0.2.0",
         capabilities=AgentCapabilities(streaming=True),
@@ -60,9 +68,7 @@ app = KAgentApp(
             )
         ],
     ),
-    # KAgent platform config — usually auto-injected by the controller
     config=KAgentConfig(),
-    # OpenTelemetry tracing (disable for local dev if no collector running)
     tracing=False,
 )
 

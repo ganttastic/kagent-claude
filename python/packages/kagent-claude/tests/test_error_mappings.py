@@ -68,6 +68,6 @@ def test_get_error_metadata_structure():
     error = RuntimeError("rate_limit_error")
     classified = classify_error(error)
     meta = get_error_metadata(classified)
-    assert meta["kagent.error_type"] == "rate_limit"
-    assert meta["kagent.error_transient"] is True
-    assert "kagent.error_detail" in meta
+    assert meta["kagent.claude.error_type"] == "rate_limit"
+    assert meta["kagent.claude.error_transient"] is True
+    assert "kagent.claude.error_detail" in meta
