@@ -29,6 +29,7 @@ from kagent.core.a2a import (
     KAGENT_HITL_DECISION_TYPE_BATCH,
     KAGENT_HITL_DECISION_TYPE_KEY,
     KAGENT_HITL_DECISION_TYPE_REJECT,
+    get_kagent_metadata_key,
     KAGENT_HITL_DECISIONS_KEY,
     KAGENT_HITL_REJECTION_REASONS_KEY,
     extract_ask_user_answers_from_message,
@@ -207,10 +208,14 @@ def build_confirmation_data_part(approval: PendingApproval) -> dict:
 
 
 def build_confirmation_metadata() -> dict:
-    """Build the A2A DataPart metadata for an approval request."""
+    """Build the A2A DataPart metadata for an approval request.
+
+    Uses prefixed keys (kagent_type, kagent_is_long_running) which the
+    kagent dashboard requires for rendering the approval prompt.
+    """
     return {
-        A2A_DATA_PART_METADATA_TYPE_KEY: A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
-        A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY: True,
+        get_kagent_metadata_key(A2A_DATA_PART_METADATA_TYPE_KEY): A2A_DATA_PART_METADATA_TYPE_FUNCTION_CALL,
+        get_kagent_metadata_key(A2A_DATA_PART_METADATA_IS_LONG_RUNNING_KEY): True,
     }
 
 

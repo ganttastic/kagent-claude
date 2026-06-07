@@ -54,7 +54,6 @@ from ._hitl import (
     build_confirmation_metadata,
     extract_ask_user_answers_text,
     extract_hitl_decision_from_message,
-    make_can_use_tool_callback,
 )
 from ._metadata_utils import (
     completion_metadata,
@@ -126,7 +125,7 @@ class ClaudeAgentExecutor(AgentExecutor):
     - Streaming intermediate events (tool calls, results) to the dashboard
     - Execution timeout with configurable duration
     - Error classification with user-friendly messages
-    - HITL (Human-in-the-Loop) via the Claude SDK's can_use_tool callback
+    - HITL (Human-in-the-Loop) via PreToolUse hooks that pause for user approval
     - Session continuity via session_id resume
     - OpenTelemetry tracing integration
     """
@@ -397,11 +396,12 @@ class ClaudeAgentExecutor(AgentExecutor):
         event_queue: EventQueue,
     ) -> None:
         """
-        Execute with HITL support.
+        Execute with HITL support via PreToolUse hooks.
 
-        Runs the Claude query in a background task. If can_use_tool fires,
-        the bridge signals us to emit input_required and return. The background
-        task stays paused until the next execute() call resolves the approval.
+        Uses a PreToolUse hook that pauses Claude's execution by awaiting
+        a Future on the HITL bridge. When the user approves/denies via the
+        kagent dashboard, the bridge resolves the Future and the hook returns
+        the decision to the SDK.
         """
         context_id = context.context_id
 
@@ -420,11 +420,8 @@ class ClaudeAgentExecutor(AgentExecutor):
         # Register the HITL notify event so the bridge can wake us without polling
         self._hitl_bridge.register_notify_event(context_id, rq.hitl_event)
 
-        # Create the can_use_tool callback wired to our bridge
-        can_use_tool = await make_can_use_tool_callback(self._hitl_bridge, context_id)
-
-        # Inject can_use_tool and the required PreToolUse hook into options
-        hitl_options = self._inject_hitl_options(options, can_use_tool)
+        # Inject PreToolUse hook that pauses for HITL approval
+        hitl_options = self._inject_hitl_options(options, context_id)
 
         async def _run_query():
             """Background coroutine that runs the Claude query to completion."""
@@ -498,6 +495,7 @@ class ClaudeAgentExecutor(AgentExecutor):
         hitl_waiter = asyncio.ensure_future(_wait_for_hitl())
         try:
             # Wait for whichever fires first: query done or HITL needed
+            logger.debug(f"HITL wait: task.done={rq.task.done()}, hitl_event.is_set={rq.hitl_event.is_set()}")
             done, _pending = await asyncio.wait(
                 [rq.task, hitl_waiter],
                 return_when=asyncio.FIRST_COMPLETED,
@@ -505,6 +503,7 @@ class ClaudeAgentExecutor(AgentExecutor):
 
             if hitl_waiter in done:
                 # Claude is paused waiting for approval — emit input_required
+                logger.info(f"HITL: tool approval needed for context {context_id}")
                 await self._emit_input_required(context, event_queue)
                 # Reset the event for the next round of HITL
                 rq.hitl_event.clear()
@@ -512,6 +511,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                 return
 
             # The query task finished (hitl_waiter was not in done)
+            logger.info(f"HITL: query completed for context {context_id}")
             # Ensure completed_event is set so callers see it
             rq.completed_event.set()
         finally:
@@ -552,12 +552,15 @@ class ClaudeAgentExecutor(AgentExecutor):
     ) -> None:
         """Handle a HITL resume: resolve pending approvals and wait for completion."""
         context_id = context.context_id
+        logger.info(f"HITL resume for context {context_id}")
         result = extract_hitl_decision_from_message(context.message)
         if not result:
+            logger.warning(f"HITL resume: invalid message for context {context_id}")
             await self._emit_failed(context, event_queue, "Invalid HITL response message")
             return
 
         decision_type, decisions, rejection_reasons = result
+        logger.info(f"HITL resume: decision_type={decision_type} for context {context_id}")
 
         # Resolve the pending approvals using kagent-core constants
         if decision_type == KAGENT_HITL_DECISION_TYPE_BATCH:
@@ -572,24 +575,21 @@ class ClaudeAgentExecutor(AgentExecutor):
                 context_id, ApprovalDecision(approved=False, rejection_reason=reason)
             )
 
-        # Signal working state again
-        await event_queue.enqueue_event(
-            TaskStatusUpdateEvent(
-                task_id=context.task_id,
-                status=TaskStatus(
-                    state=TaskState.working,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                ),
-                context_id=context.context_id,
-                final=False,
-            )
-        )
+        # Do NOT emit a "working" event here — the a2a framework's
+        # consume_and_break_on_interrupt returns the HTTP response on
+        # any non-final event. We need the queue to stay open until we
+        # emit either input_required (another tool) or completed/failed.
 
         # Wait for the background query to either complete or hit another HITL
         rq = self._running_queries.get(context_id)
         if not rq:
             await self._emit_failed(context, event_queue, "No running query to resume")
             return
+
+        # Clear the HITL event before re-entering the wait loop.
+        # The event was set by the bridge when the approval was created;
+        # now that we've resolved it, we need a fresh event for the next tool.
+        rq.hitl_event.clear()
 
         try:
             await asyncio.wait_for(
@@ -743,27 +743,49 @@ class ClaudeAgentExecutor(AgentExecutor):
         return self.options
 
     def _inject_hitl_options(
-        self, options: ClaudeAgentOptions, can_use_tool
+        self, options: ClaudeAgentOptions, context_id: str
     ) -> ClaudeAgentOptions:
         """
-        Inject can_use_tool callback and the required PreToolUse dummy hook
-        into the options for HITL mode.
+        Inject a PreToolUse hook that pauses execution for HITL approval.
+
+        The hook creates a pending approval on the bridge, awaits the user's
+        decision Future, and returns {"decision": "approve"} or
+        {"decision": "block", "reason": "..."} to the SDK.
         """
-        # The Claude SDK requires a PreToolUse hook returning {"continue_": True}
-        # to keep the stream open while can_use_tool is pending
-        async def _keep_stream_open(input_data, tool_use_id, context):
-            return {"continue_": True}
+        bridge = self._hitl_bridge
+
+        async def _hitl_pre_tool_use(input_data, tool_use_id, hook_context):
+            tool_name = input_data.get("tool_name", "unknown")
+            tool_input = input_data.get("tool_input", {})
+
+            # Create approval and pause — the bridge signals the notify event
+            approval = bridge.create_approval(
+                context_id=context_id,
+                tool_name=tool_name,
+                tool_input=tool_input,
+                tool_use_id=tool_use_id,
+            )
+
+            # Await the user's decision (set by _handle_hitl_resume)
+            decision: ApprovalDecision = await approval.future
+
+            if decision.approved:
+                return {"decision": "approve"}
+            else:
+                return {
+                    "decision": "block",
+                    "reason": decision.rejection_reason or "User denied this action",
+                }
 
         existing_hooks = getattr(options, "hooks", None) or {}
         pre_tool_use = existing_hooks.get("PreToolUse", [])
         pre_tool_use = list(pre_tool_use) + [
-            HookMatcher(matcher=None, hooks=[_keep_stream_open])
+            HookMatcher(matcher=None, hooks=[_hitl_pre_tool_use])
         ]
         updated_hooks = {**existing_hooks, "PreToolUse": pre_tool_use}
 
-        # Build new options with can_use_tool and hooks
+        # Build new options with hooks (no can_use_tool needed)
         opts_dict = _public_attrs(options)
-        opts_dict["can_use_tool"] = can_use_tool
         opts_dict["hooks"] = updated_hooks
 
         return ClaudeAgentOptions(**opts_dict)
