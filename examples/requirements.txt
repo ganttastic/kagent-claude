@@ -1,1 +1,1 @@
-kagent-claude>=0.1.0
+kagent-claude @ git+https://github.com/ganttastic/kagent-claude.git#subdirectory=python/packages/kagent-claude

@@ -1,8 +1,10 @@
 """
 Example kagent-claude BYO agent.
 
-Run locally (without kagent controller):
-    ANTHROPIC_API_KEY=sk-... KAGENT_URL=http://localhost:8083 KAGENT_NAME=claude-agent KAGENT_NAMESPACE=default python examples/main.py
+Run locally:
+    ANTHROPIC_API_KEY=sk-... KAGENT_URL=http://localhost:8083 \
+    KAGENT_NAME=claude-agent KAGENT_NAMESPACE=default \
+    python examples/basic.py
 
 Then send an A2A message:
     curl -X POST http://localhost:8080/ \

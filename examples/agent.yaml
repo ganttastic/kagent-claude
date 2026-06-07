@@ -1,16 +1,15 @@
-# kagent-claude BYO Agent deployment
+# Example kagent-claude BYO Agent
 #
-# The kagent controller manages the Deployment and Service for BYO agents.
+# The kagent controller creates the Deployment and Service automatically.
 # You only need to:
-# 1. Ensure the kagent namespace exists (created by kagent install)
-# 2. Create the Secret with your Anthropic API key
-# 3. Apply the Agent CRD below
+# 1. Create the Secret with your Anthropic API key
+# 2. Build and push your container image
+# 3. Apply this file
 #
 # Prerequisites:
 #   kubectl create secret generic kagent-anthropic \
 #     --namespace=kagent \
 #     --from-literal=ANTHROPIC_API_KEY=sk-ant-...
-
 ---
 apiVersion: kagent.dev/v1alpha2
 kind: Agent
@@ -22,7 +21,8 @@ spec:
   type: BYO
   byo:
     deployment:
-      image: ghcr.io/ganttastic/kagent-claude:latest
+      # Replace with your own image
+      image: ghcr.io/your-org/my-claude-agent:latest
       env:
         - name: ANTHROPIC_API_KEY
           valueFrom:

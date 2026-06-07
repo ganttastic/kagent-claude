@@ -376,7 +376,7 @@ docker build -t ghcr.io/your-org/my-claude-agent:latest .
 docker push ghcr.io/your-org/my-claude-agent:latest
 ```
 
-> **Note:** The `deploy/` directory in this repo contains a reference Dockerfile and build script if you prefer to build from source.
+> **Note:** The `examples/` directory contains a ready-to-use Dockerfile, build script, and Agent CRD you can use directly or adapt.
 
 #### Apply the Agent CRD
 
@@ -452,7 +452,7 @@ export KAGENT_URL=http://localhost:8083
 export KAGENT_NAME=claude-agent
 export KAGENT_NAMESPACE=default
 
-python examples/main.py
+python examples/basic.py
 ```
 
 Then test with an A2A request:
