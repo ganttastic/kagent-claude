@@ -20,13 +20,22 @@ Environment Variables:
     CLAUDE_HITL_TIMEOUT     HITL-specific timeout (overrides CLAUDE_TIMEOUT
                             when HITL is enabled). Default: 600.
     CLAUDE_MCP_SERVERS      JSON object mapping server names to their config.
+                            Supports both stdio servers (command/args) and
+                            remote HTTP/SSE servers (type/url/headers).
                             Values in the config that look like $ENV_VAR are
                             resolved against the pod environment at startup.
-                            Example:
-                              {"github": {"command": "npx",
+                            Examples:
+                              Stdio:  {"gh": {"command": "npx",
                                 "args": ["@modelcontextprotocol/server-github"],
                                 "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"}}}
+                              HTTP:   {"fetch": {"type": "http",
+                                "url": "http://mcp-server.svc/mcp"}}
                             Default: none (no MCP servers).
+    CLAUDE_ALLOWED_MCP_TOOLS
+                            Comma-separated MCP tool patterns to auto-approve.
+                            Default: all tools from all configured servers
+                            (mcp__<server-name>__* for each server).
+                            Example: "mcp__fetch__*,mcp__github__list_issues"
 
     AGENT_NAME              Agent card name. Default: claude-agent.
     AGENT_DESCRIPTION       Agent card description.
@@ -203,6 +212,16 @@ def build_app() -> KAgentApp:
     mcp_servers = _parse_mcp_servers(_env("CLAUDE_MCP_SERVERS"))
     if mcp_servers:
         options_kwargs["mcp_servers"] = mcp_servers
+        # Auto-approve MCP tools. CLAUDE_ALLOWED_MCP_TOOLS can be:
+        #   - empty/unset: auto-approve all tools from all configured servers (mcp__name__*)
+        #   - comma-separated: explicit tool patterns (e.g., "mcp__fetch__*,mcp__github__list_issues")
+        mcp_tool_patterns = _env("CLAUDE_ALLOWED_MCP_TOOLS")
+        if mcp_tool_patterns:
+            mcp_tools = [t.strip() for t in mcp_tool_patterns.split(",") if t.strip()]
+        else:
+            # Default: wildcard for every configured server
+            mcp_tools = [f"mcp__{name}__*" for name in mcp_servers]
+        options_kwargs["allowed_tools"] = tools + mcp_tools
 
     options = ClaudeAgentOptions(**options_kwargs)
 
