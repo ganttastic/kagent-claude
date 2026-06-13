@@ -393,10 +393,12 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         # Extract tool name for metadata (if it's a tool call)
         tool_name = None
+        is_function_event = False
         for part in parts:
             part_inner = part.root if hasattr(part, "root") else part
             if isinstance(part_inner, DataPart) and isinstance(part_inner.data, dict):
                 tool_name = part_inner.data.get("name")
+                is_function_event = True
                 break
 
         event = emitter.build_streaming_event(
@@ -409,6 +411,20 @@ class ClaudeAgentExecutor(AgentExecutor):
             ),
         )
         await event_queue.enqueue_event(event)
+
+        # After a tool result, emit a plain "working" event so the dashboard
+        # transitions from "Calling tools" back to "Thinking"
+        if msg_type == "user" and is_function_event:
+            thinking_event = TaskStatusUpdateEvent(
+                task_id=emitter.task_id,
+                status=TaskStatus(
+                    state=TaskState.working,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                ),
+                context_id=emitter.context_id,
+                final=False,
+            )
+            await event_queue.enqueue_event(thinking_event)
 
     async def _execute_with_hitl(
         self,
