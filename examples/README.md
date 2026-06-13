@@ -68,7 +68,8 @@ All variables are optional except `ANTHROPIC_API_KEY`.
 |----------|---------|-------------|
 | `CLAUDE_MODEL` | *(SDK default)* | Claude model to use (e.g., `claude-sonnet-4-5`, `claude-opus-4-5`) |
 | `CLAUDE_FALLBACK_MODEL` | *(none)* | Fallback model if primary is unavailable |
-| `CLAUDE_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep` | Comma-separated tool list |
+| `CLAUDE_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep` | Comma-separated tools available to Claude |
+| `CLAUDE_ALLOWED_TOOLS` | *(same as `CLAUDE_TOOLS`)* | Tools auto-approved without prompting (for HITL) |
 | `CLAUDE_DISALLOWED_TOOLS` | *(none)* | Comma-separated tools to block entirely (removed from model context) |
 | `CLAUDE_SYSTEM_PROMPT` | *(none)* | System prompt for Claude |
 | `CLAUDE_MAX_TURNS` | `25` | Max turns before Claude stops |

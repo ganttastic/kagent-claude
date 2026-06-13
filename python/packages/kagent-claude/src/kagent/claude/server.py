@@ -14,8 +14,17 @@ Environment Variables:
                             Examples: claude-sonnet-4-5, claude-opus-4-5.
     CLAUDE_FALLBACK_MODEL   Fallback model if primary is unavailable.
                             Default: none.
-    CLAUDE_TOOLS            Comma-separated tool list.
+    CLAUDE_TOOLS            Comma-separated list of tools available to Claude.
                             Default: Bash,Read,Write,Edit,Glob,Grep
+    CLAUDE_ALLOWED_TOOLS    Comma-separated list of tools auto-approved without
+                            prompting. When HITL is enabled, tools in this list
+                            skip approval. Default: same as CLAUDE_TOOLS
+                            (all available tools are auto-approved).
+    CLAUDE_DISALLOWED_TOOLS Comma-separated tool names to block entirely.
+                            These tools are removed from the model's context
+                            and cannot be used even if otherwise allowed.
+                            Default: none.
+                            Example: "Bash,Write" (read-only research agent).
     CLAUDE_SYSTEM_PROMPT    System prompt for Claude. Default: none.
     CLAUDE_MAX_TURNS        Max turns before Claude stops. Default: 25.
     CLAUDE_TIMEOUT          Execution timeout in seconds. Default: 300.
@@ -32,11 +41,6 @@ Environment Variables:
     CLAUDE_EFFORT           Effort level for Claude's reasoning. Default: none
                             (SDK default, typically "high").
                             Options: low, medium, high, xhigh, max.
-    CLAUDE_DISALLOWED_TOOLS Comma-separated tool names to block entirely.
-                            These tools are removed from the model's context
-                            and cannot be used even if otherwise allowed.
-                            Default: none.
-                            Example: "Bash,Write" (read-only research agent).
     CLAUDE_ADD_DIRS         Comma-separated absolute paths Claude can access
                             beyond CLAUDE_CWD. Use for mounted volumes.
                             Default: none.
@@ -287,6 +291,8 @@ def build_app() -> KAgentApp:
     """Build a KAgentApp from environment variables."""
     # --- Claude SDK options ---
     tools = _parse_tools(_env("CLAUDE_TOOLS"))
+    allowed_tools_raw = _env("CLAUDE_ALLOWED_TOOLS")
+    allowed_tools = _parse_comma_list(allowed_tools_raw) if allowed_tools_raw else tools
     system_prompt = _env("CLAUDE_SYSTEM_PROMPT") or None
     max_turns = _env_int("CLAUDE_MAX_TURNS", 25)
     model = _env("CLAUDE_MODEL") or None
@@ -299,7 +305,10 @@ def build_app() -> KAgentApp:
     add_dirs = _parse_dirs(_env("CLAUDE_ADD_DIRS"))
     strict_mcp_config = _env_bool("CLAUDE_STRICT_MCP_CONFIG", False)
 
-    options_kwargs: dict = {"allowed_tools": tools}
+    options_kwargs: dict = {
+        "tools": tools,
+        "allowed_tools": allowed_tools,
+    }
     if model:
         options_kwargs["model"] = model
     if fallback_model:
@@ -334,7 +343,7 @@ def build_app() -> KAgentApp:
         else:
             # Default: wildcard for every configured server
             mcp_tools = [f"mcp__{name}__*" for name in mcp_servers]
-        options_kwargs["allowed_tools"] = tools + mcp_tools
+        options_kwargs["allowed_tools"] = allowed_tools + mcp_tools
 
     # Skills — discovered from .claude/skills/ in CLAUDE_CWD (default: /app)
     # Mount skill files via ConfigMap at /app/.claude/skills/<name>/SKILL.md
@@ -409,11 +418,13 @@ def build_app() -> KAgentApp:
     # Log the configuration for visibility
     mcp_names = list(mcp_servers.keys()) if mcp_servers else []
     skills_info = options_kwargs.get("skills", "disabled")
+    effective_allowed = options_kwargs.get("allowed_tools", allowed_tools)
     logger.info(
         f"kagent-claude server configured: "
         f"name={agent_name} model={model or 'default'} "
         f"fallback_model={fallback_model or 'none'} "
-        f"tools={tools} disallowed_tools={disallowed_tools or 'none'} "
+        f"tools={tools} allowed_tools={effective_allowed} "
+        f"disallowed_tools={disallowed_tools or 'none'} "
         f"hitl={enable_hitl} "
         f"streaming={enable_streaming} timeout={timeout}s "
         f"max_turns={max_turns} tracing={enable_tracing} "

@@ -145,7 +145,8 @@ All [Claude Agent SDK options](https://code.claude.com/docs/en/agent-sdk/overvie
 ClaudeAgentOptions(
     model="claude-sonnet-4-5",          # Which model to use
     fallback_model="claude-haiku-4",    # Auto-failover if primary unavailable
-    allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"],
+    tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"],
+    allowed_tools=["Read", "Glob", "Grep"],  # Auto-approved (others need HITL approval)
     disallowed_tools=["WebSearch"],     # Block specific tools entirely
     system_prompt="You are a helpful coding assistant.",
     max_turns=10,
@@ -171,7 +172,8 @@ When using the golden image, all SDK options are configurable via environment va
 |----------|---------|-------------|
 | `CLAUDE_MODEL` | *(SDK default)* | Claude model (e.g., `claude-sonnet-4-5`, `claude-opus-4-5`) |
 | `CLAUDE_FALLBACK_MODEL` | *(none)* | Fallback model if primary is unavailable |
-| `CLAUDE_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep` | Comma-separated allowed tool list |
+| `CLAUDE_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep` | Comma-separated tools available to Claude |
+| `CLAUDE_ALLOWED_TOOLS` | *(same as `CLAUDE_TOOLS`)* | Tools auto-approved without prompting (for HITL scenarios) |
 | `CLAUDE_DISALLOWED_TOOLS` | *(none)* | Comma-separated tools to block entirely |
 | `CLAUDE_SYSTEM_PROMPT` | *(none)* | System prompt for Claude |
 | `CLAUDE_MAX_TURNS` | `25` | Max conversation turns |

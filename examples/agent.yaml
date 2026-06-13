@@ -32,6 +32,8 @@ spec:
         # --- Claude SDK options ---
         - name: CLAUDE_TOOLS
           value: "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch"
+        # - name: CLAUDE_ALLOWED_TOOLS
+        #   value: "Read,Glob,Grep"   # If unset, defaults to CLAUDE_TOOLS (all auto-approved)
         # - name: CLAUDE_MODEL
         #   value: "claude-sonnet-4-5"
         # - name: CLAUDE_FALLBACK_MODEL

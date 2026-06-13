@@ -477,9 +477,9 @@ class TestBuildApp:
         _, MockOptions, MockApp, MockConfig = self._build_with_env({})
 
         options_kwargs = MockOptions.call_args[1]
-        assert options_kwargs["allowed_tools"] == [
-            "Bash", "Read", "Write", "Edit", "Glob", "Grep"
-        ]
+        default_tools = ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+        assert options_kwargs["tools"] == default_tools
+        assert options_kwargs["allowed_tools"] == default_tools
         assert "system_prompt" not in options_kwargs
         assert options_kwargs["max_turns"] == 25
 
@@ -491,7 +491,30 @@ class TestBuildApp:
     def test_custom_tools(self):
         _, MockOptions, _, _ = self._build_with_env({"CLAUDE_TOOLS": "Bash,Read"})
         options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["tools"] == ["Bash", "Read"]
+        # When CLAUDE_ALLOWED_TOOLS is unset, defaults to same as tools
         assert options_kwargs["allowed_tools"] == ["Bash", "Read"]
+
+    def test_allowed_tools_separate_from_tools(self):
+        _, MockOptions, _, _ = self._build_with_env({
+            "CLAUDE_TOOLS": "Bash,Read,Write,Edit",
+            "CLAUDE_ALLOWED_TOOLS": "Read,Edit",
+        })
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["tools"] == ["Bash", "Read", "Write", "Edit"]
+        assert options_kwargs["allowed_tools"] == ["Read", "Edit"]
+
+    def test_allowed_tools_without_explicit_tools(self):
+        _, MockOptions, _, _ = self._build_with_env({
+            "CLAUDE_ALLOWED_TOOLS": "Read,Glob",
+        })
+        options_kwargs = MockOptions.call_args[1]
+        # tools defaults
+        assert options_kwargs["tools"] == [
+            "Bash", "Read", "Write", "Edit", "Glob", "Grep"
+        ]
+        # allowed_tools is the explicit override
+        assert options_kwargs["allowed_tools"] == ["Read", "Glob"]
 
     def test_system_prompt_set(self):
         _, MockOptions, _, _ = self._build_with_env(
@@ -803,13 +826,15 @@ class TestBuildApp:
         """Integration test: a fully locked-down read-only agent."""
         _, MockOptions, _, _ = self._build_with_env({
             "CLAUDE_TOOLS": "Read,Glob,Grep",
+            "CLAUDE_ALLOWED_TOOLS": "Read,Glob",
             "CLAUDE_DISALLOWED_TOOLS": "Bash,Write,Edit",
             "CLAUDE_PERMISSION_MODE": "dontAsk",
             "CLAUDE_STRICT_MCP_CONFIG": "true",
             "CLAUDE_MAX_BUDGET_USD": "2.0",
         })
         options_kwargs = MockOptions.call_args[1]
-        assert options_kwargs["allowed_tools"] == ["Read", "Glob", "Grep"]
+        assert options_kwargs["tools"] == ["Read", "Glob", "Grep"]
+        assert options_kwargs["allowed_tools"] == ["Read", "Glob"]
         assert options_kwargs["disallowed_tools"] == ["Bash", "Write", "Edit"]
         assert options_kwargs["permission_mode"] == "dontAsk"
         assert options_kwargs["strict_mcp_config"] is True
