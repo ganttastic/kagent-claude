@@ -5,6 +5,33 @@ All notable changes to `kagent-claude` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-13
+
+### Added
+- `CLAUDE_MODEL` env var — specify default Claude model (e.g., `claude-sonnet-4-5`).
+- `CLAUDE_FALLBACK_MODEL` env var — auto-failover model if primary is unavailable.
+- `CLAUDE_ALLOWED_TOOLS` env var — separate control over which tools are auto-approved without prompting. Defaults to `CLAUDE_TOOLS` when unset.
+- `CLAUDE_DISALLOWED_TOOLS` env var — blocklist tools entirely from the model's context.
+- `CLAUDE_PERMISSION_MODE` env var — security posture (`default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk`).
+- `CLAUDE_MAX_BUDGET_USD` env var — per-execution cost cap in USD.
+- `CLAUDE_EFFORT` env var — reasoning depth control (`low`, `medium`, `high`, `xhigh`, `max`).
+- `CLAUDE_ADD_DIRS` env var — grant access to additional directories (for Kubernetes volume mounts).
+- `CLAUDE_STRICT_MCP_CONFIG` env var — ignore project `.mcp.json` files, only use `CLAUDE_MCP_SERVERS`.
+- Code coverage reporting via Codecov (85% coverage).
+- CI/PyPI/Python/License/GHCR badges on README.
+- Development section in README.
+
+### Changed
+- **Breaking:** `CLAUDE_TOOLS` now maps to `ClaudeAgentOptions.tools` (available tools) instead of `allowed_tools` (auto-approved tools). When `CLAUDE_ALLOWED_TOOLS` is unset, it defaults to the same value as `CLAUDE_TOOLS` — so existing deployments without `CLAUDE_ALLOWED_TOOLS` behave identically.
+- OTel tracing reports actual model name in `gen_ai.request.model` and `gen_ai.response.model` spans (previously hardcoded `"claude-agent-sdk"`).
+- Comma-separated list parsing consolidated into `_parse_comma_list()` helper — removes duplication across tool, MCP, and skill parsing.
+- Docker container now runs as non-root user (`claude`, uid 1000) — required for `bypassPermissions` mode and follows container security best practices.
+- Upgraded `claude-agent-sdk` from `0.2.93` to `0.2.101`.
+
+### Fixed
+- Dashboard stuck on "Calling tools" after tool execution. Now emits a plain `state=working` event after each tool result to transition back to "Thinking".
+- Container crash (`executable file not found in $PATH`) when running as non-root — `pip install` now runs as root for system-wide script installation, then switches to non-root for runtime.
+
 ## [0.3.15] - 2026-06-07
 
 ### Added
