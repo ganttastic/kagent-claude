@@ -1,5 +1,11 @@
 # kagent-claude
 
+[![CI](https://github.com/ganttastic/kagent-claude/actions/workflows/ci.yml/badge.svg)](https://github.com/ganttastic/kagent-claude/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/kagent-claude)](https://pypi.org/project/kagent-claude/)
+[![Python](https://img.shields.io/pypi/pyversions/kagent-claude)](https://pypi.org/project/kagent-claude/)
+[![License](https://img.shields.io/github/license/ganttastic/kagent-claude)](https://github.com/ganttastic/kagent-claude/blob/main/LICENSE)
+[![GHCR](https://img.shields.io/badge/container-ghcr.io-blue?logo=github)](https://ghcr.io/ganttastic/kagent-claude)
+
 A Python integration package that runs the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) as a BYO (Bring Your Own) agent inside the [kagent](https://kagent.dev) platform.
 
 Once deployed, your Claude agent is a first-class kagent citizen — visible in the dashboard, invocable via CLI, chainable with other agents, and observable via OpenTelemetry.
