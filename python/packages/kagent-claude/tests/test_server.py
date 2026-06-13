@@ -13,7 +13,9 @@ from kagent.claude.server import (
     _env_float,
     _env_int,
     _interpolate_env_vars,
+    _parse_effort,
     _parse_mcp_servers,
+    _parse_permission_mode,
     _parse_skills,
     _parse_tools,
     build_app,
@@ -316,6 +318,71 @@ class TestParseSkills:
 
 
 # ---------------------------------------------------------------------------
+# _parse_permission_mode
+# ---------------------------------------------------------------------------
+
+
+class TestParsePermissionMode:
+    def test_empty_string_returns_none(self):
+        assert _parse_permission_mode("") is None
+
+    def test_valid_modes(self):
+        assert _parse_permission_mode("default") == "default"
+        assert _parse_permission_mode("acceptEdits") == "acceptEdits"
+        assert _parse_permission_mode("bypassPermissions") == "bypassPermissions"
+        assert _parse_permission_mode("plan") == "plan"
+        assert _parse_permission_mode("dontAsk") == "dontAsk"
+
+    def test_case_insensitive(self):
+        assert _parse_permission_mode("ACCEPTEDITS") == "acceptEdits"
+        assert _parse_permission_mode("bypasspermissions") == "bypassPermissions"
+        assert _parse_permission_mode("Plan") == "plan"
+        assert _parse_permission_mode("DONTASK") == "dontAsk"
+
+    def test_strips_whitespace(self):
+        assert _parse_permission_mode("  plan  ") == "plan"
+
+    def test_invalid_returns_none_with_warning(self):
+        with patch("kagent.claude.server.logger") as mock_logger:
+            result = _parse_permission_mode("invalid_mode")
+            assert result is None
+            mock_logger.warning.assert_called_once()
+            assert "Invalid CLAUDE_PERMISSION_MODE" in mock_logger.warning.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
+# _parse_effort
+# ---------------------------------------------------------------------------
+
+
+class TestParseEffort:
+    def test_empty_string_returns_none(self):
+        assert _parse_effort("") is None
+
+    def test_valid_levels(self):
+        assert _parse_effort("low") == "low"
+        assert _parse_effort("medium") == "medium"
+        assert _parse_effort("high") == "high"
+        assert _parse_effort("xhigh") == "xhigh"
+        assert _parse_effort("max") == "max"
+
+    def test_case_insensitive(self):
+        assert _parse_effort("LOW") == "low"
+        assert _parse_effort("High") == "high"
+        assert _parse_effort("MAX") == "max"
+
+    def test_strips_whitespace(self):
+        assert _parse_effort("  medium  ") == "medium"
+
+    def test_invalid_returns_none_with_warning(self):
+        with patch("kagent.claude.server.logger") as mock_logger:
+            result = _parse_effort("ultra")
+            assert result is None
+            mock_logger.warning.assert_called_once()
+            assert "Invalid CLAUDE_EFFORT" in mock_logger.warning.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
 # build_app
 # ---------------------------------------------------------------------------
 
@@ -500,3 +567,110 @@ class TestBuildApp:
     def test_returns_app_instance(self):
         result, _, MockApp, _ = self._build_with_env({})
         assert result is MockApp.return_value
+
+    def test_model_set(self):
+        _, MockOptions, _, _ = self._build_with_env({"CLAUDE_MODEL": "claude-sonnet-4-5"})
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["model"] == "claude-sonnet-4-5"
+
+    def test_model_not_set_by_default(self):
+        _, MockOptions, _, _ = self._build_with_env({})
+        options_kwargs = MockOptions.call_args[1]
+        assert "model" not in options_kwargs
+
+    def test_fallback_model_set(self):
+        _, MockOptions, _, _ = self._build_with_env(
+            {"CLAUDE_FALLBACK_MODEL": "claude-haiku-4"}
+        )
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["fallback_model"] == "claude-haiku-4"
+
+    def test_fallback_model_not_set_by_default(self):
+        _, MockOptions, _, _ = self._build_with_env({})
+        options_kwargs = MockOptions.call_args[1]
+        assert "fallback_model" not in options_kwargs
+
+    def test_permission_mode_set(self):
+        _, MockOptions, _, _ = self._build_with_env(
+            {"CLAUDE_PERMISSION_MODE": "bypassPermissions"}
+        )
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["permission_mode"] == "bypassPermissions"
+
+    def test_permission_mode_case_insensitive(self):
+        _, MockOptions, _, _ = self._build_with_env(
+            {"CLAUDE_PERMISSION_MODE": "acceptedits"}
+        )
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["permission_mode"] == "acceptEdits"
+
+    def test_permission_mode_not_set_by_default(self):
+        _, MockOptions, _, _ = self._build_with_env({})
+        options_kwargs = MockOptions.call_args[1]
+        assert "permission_mode" not in options_kwargs
+
+    def test_permission_mode_invalid_ignored(self):
+        _, MockOptions, _, _ = self._build_with_env(
+            {"CLAUDE_PERMISSION_MODE": "badvalue"}
+        )
+        options_kwargs = MockOptions.call_args[1]
+        assert "permission_mode" not in options_kwargs
+
+    def test_max_budget_usd_set(self):
+        _, MockOptions, _, _ = self._build_with_env({"CLAUDE_MAX_BUDGET_USD": "5.50"})
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["max_budget_usd"] == pytest.approx(5.50)
+
+    def test_max_budget_usd_not_set_by_default(self):
+        _, MockOptions, _, _ = self._build_with_env({})
+        options_kwargs = MockOptions.call_args[1]
+        assert "max_budget_usd" not in options_kwargs
+
+    def test_max_budget_usd_zero_not_set(self):
+        _, MockOptions, _, _ = self._build_with_env({"CLAUDE_MAX_BUDGET_USD": "0"})
+        options_kwargs = MockOptions.call_args[1]
+        assert "max_budget_usd" not in options_kwargs
+
+    def test_effort_set(self):
+        _, MockOptions, _, _ = self._build_with_env({"CLAUDE_EFFORT": "low"})
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["effort"] == "low"
+
+    def test_effort_case_insensitive(self):
+        _, MockOptions, _, _ = self._build_with_env({"CLAUDE_EFFORT": "HIGH"})
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["effort"] == "high"
+
+    def test_effort_not_set_by_default(self):
+        _, MockOptions, _, _ = self._build_with_env({})
+        options_kwargs = MockOptions.call_args[1]
+        assert "effort" not in options_kwargs
+
+    def test_effort_invalid_ignored(self):
+        _, MockOptions, _, _ = self._build_with_env({"CLAUDE_EFFORT": "turbo"})
+        options_kwargs = MockOptions.call_args[1]
+        assert "effort" not in options_kwargs
+
+    def test_model_with_fallback_both_set(self):
+        _, MockOptions, _, _ = self._build_with_env({
+            "CLAUDE_MODEL": "claude-opus-4-5",
+            "CLAUDE_FALLBACK_MODEL": "claude-sonnet-4-5",
+        })
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["model"] == "claude-opus-4-5"
+        assert options_kwargs["fallback_model"] == "claude-sonnet-4-5"
+
+    def test_all_new_options_combined(self):
+        _, MockOptions, _, _ = self._build_with_env({
+            "CLAUDE_MODEL": "claude-sonnet-4-5",
+            "CLAUDE_FALLBACK_MODEL": "claude-haiku-4",
+            "CLAUDE_PERMISSION_MODE": "acceptEdits",
+            "CLAUDE_MAX_BUDGET_USD": "10.0",
+            "CLAUDE_EFFORT": "medium",
+        })
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["model"] == "claude-sonnet-4-5"
+        assert options_kwargs["fallback_model"] == "claude-haiku-4"
+        assert options_kwargs["permission_mode"] == "acceptEdits"
+        assert options_kwargs["max_budget_usd"] == pytest.approx(10.0)
+        assert options_kwargs["effort"] == "medium"

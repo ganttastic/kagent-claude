@@ -10,6 +10,10 @@ Environment Variables:
     KAGENT_NAME             Auto-injected by kagent controller.
     KAGENT_NAMESPACE        Auto-injected by kagent controller.
 
+    CLAUDE_MODEL            Claude model to use. Default: SDK default.
+                            Examples: claude-sonnet-4-5, claude-opus-4-5.
+    CLAUDE_FALLBACK_MODEL   Fallback model if primary is unavailable.
+                            Default: none.
     CLAUDE_TOOLS            Comma-separated tool list.
                             Default: Bash,Read,Write,Edit,Glob,Grep
     CLAUDE_SYSTEM_PROMPT    System prompt for Claude. Default: none.
@@ -19,6 +23,15 @@ Environment Variables:
     CLAUDE_HITL             Enable HITL tool approval. Default: false.
     CLAUDE_HITL_TIMEOUT     HITL-specific timeout (overrides CLAUDE_TIMEOUT
                             when HITL is enabled). Default: 600.
+    CLAUDE_PERMISSION_MODE  Permission mode for tool execution. Default: none
+                            (SDK default behavior).
+                            Options: default, acceptEdits, bypassPermissions,
+                            plan, dontAsk.
+    CLAUDE_MAX_BUDGET_USD   Maximum budget in USD per execution. Default: none
+                            (no limit). The query stops if exceeded.
+    CLAUDE_EFFORT           Effort level for Claude's reasoning. Default: none
+                            (SDK default, typically "high").
+                            Options: low, medium, high, xhigh, max.
     CLAUDE_MCP_SERVERS      JSON object mapping server names to their config.
                             Supports both stdio servers (command/args) and
                             remote HTTP/SSE servers (type/url/headers).
@@ -201,18 +214,66 @@ def _parse_skills(val: str) -> list[AgentSkill]:
         return _parse_skills("")
 
 
+def _parse_permission_mode(val: str) -> str | None:
+    """Parse and validate permission mode."""
+    if not val:
+        return None
+    valid_modes = {"default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"}
+    # Accept case-insensitive input but map to the SDK's expected casing
+    mode_map = {m.lower(): m for m in valid_modes}
+    normalized = val.lower().strip()
+    if normalized in mode_map:
+        return mode_map[normalized]
+    logger.warning(
+        f"Invalid CLAUDE_PERMISSION_MODE={val!r}. "
+        f"Valid options: {sorted(valid_modes)}. Ignoring."
+    )
+    return None
+
+
+def _parse_effort(val: str) -> str | None:
+    """Parse and validate effort level."""
+    if not val:
+        return None
+    valid_levels = {"low", "medium", "high", "xhigh", "max"}
+    normalized = val.lower().strip()
+    if normalized in valid_levels:
+        return normalized
+    logger.warning(
+        f"Invalid CLAUDE_EFFORT={val!r}. "
+        f"Valid options: {sorted(valid_levels)}. Ignoring."
+    )
+    return None
+
+
 def build_app() -> KAgentApp:
     """Build a KAgentApp from environment variables."""
     # --- Claude SDK options ---
     tools = _parse_tools(_env("CLAUDE_TOOLS"))
     system_prompt = _env("CLAUDE_SYSTEM_PROMPT") or None
     max_turns = _env_int("CLAUDE_MAX_TURNS", 25)
+    model = _env("CLAUDE_MODEL") or None
+    fallback_model = _env("CLAUDE_FALLBACK_MODEL") or None
+    permission_mode = _parse_permission_mode(_env("CLAUDE_PERMISSION_MODE"))
+    max_budget_raw = _env("CLAUDE_MAX_BUDGET_USD")
+    max_budget_usd = _env_float("CLAUDE_MAX_BUDGET_USD") if max_budget_raw else None
+    effort = _parse_effort(_env("CLAUDE_EFFORT"))
 
     options_kwargs: dict = {"allowed_tools": tools}
+    if model:
+        options_kwargs["model"] = model
+    if fallback_model:
+        options_kwargs["fallback_model"] = fallback_model
     if system_prompt:
         options_kwargs["system_prompt"] = system_prompt
     if max_turns > 0:
         options_kwargs["max_turns"] = max_turns
+    if permission_mode:
+        options_kwargs["permission_mode"] = permission_mode
+    if max_budget_usd is not None and max_budget_usd > 0:
+        options_kwargs["max_budget_usd"] = max_budget_usd
+    if effort:
+        options_kwargs["effort"] = effort
 
     # MCP servers
     mcp_servers = _parse_mcp_servers(_env("CLAUDE_MCP_SERVERS"))
@@ -304,9 +365,14 @@ def build_app() -> KAgentApp:
     skills_info = options_kwargs.get("skills", "disabled")
     logger.info(
         f"kagent-claude server configured: "
-        f"name={agent_name} tools={tools} hitl={enable_hitl} "
+        f"name={agent_name} model={model or 'default'} "
+        f"fallback_model={fallback_model or 'none'} "
+        f"tools={tools} hitl={enable_hitl} "
         f"streaming={enable_streaming} timeout={timeout}s "
         f"max_turns={max_turns} tracing={enable_tracing} "
+        f"permission_mode={permission_mode or 'default'} "
+        f"max_budget_usd={max_budget_usd or 'unlimited'} "
+        f"effort={effort or 'default'} "
         f"mcp_servers={mcp_names} skills={skills_info}"
     )
 

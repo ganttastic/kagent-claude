@@ -313,11 +313,15 @@ class ClaudeAgentExecutor(AgentExecutor):
             context_id=context_id,
         )
 
+        # Extract model name for tracing (may be None → SDK default)
+        model = getattr(options, "model", None)
+
         async with trace_query(
             prompt=user_input,
             session_id=claude_session_id,
             context_id=context_id,
             app_name=self.app_name,
+            model=model,
         ) as span:
             async for message in query(
                 prompt=user_input,
@@ -347,7 +351,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                     accumulated_text.append(message.result)
 
             final_text = "".join(accumulated_text) or "No response was generated."
-            record_completion(span, new_session_id, msg_index, len(final_text))
+            record_completion(span, new_session_id, msg_index, len(final_text), model=model)
 
         # Persist session mapping
         if new_session_id and context_id:

@@ -17,6 +17,7 @@ async def trace_query(
     session_id: str | None,
     context_id: str | None,
     app_name: str,
+    model: str | None = None,
 ):
     """
     Creates a span around the full Claude Agent SDK query() call.
@@ -24,13 +25,14 @@ async def trace_query(
     Attributes follow OpenTelemetry semantic conventions for GenAI:
     https://opentelemetry.io/docs/specs/semconv/gen-ai/
     """
+    request_model = model or "claude-agent-sdk"
     with _tracer.start_as_current_span(
         "claude.query",
         kind=trace.SpanKind.CLIENT,
         attributes={
             "gen_ai.system": "claude",
             "gen_ai.operation.name": "query",
-            "gen_ai.request.model": "claude-agent-sdk",
+            "gen_ai.request.model": request_model,
             "kagent.app_name": app_name,
             "kagent.context_id": context_id or "",
             "kagent.session.resume": session_id or "",
@@ -69,10 +71,12 @@ def record_completion(
     session_id: str | None,
     total_messages: int,
     result_length: int,
+    model: str | None = None,
 ) -> None:
     """Record completion metrics on the query span."""
+    response_model = model or "claude-agent-sdk"
     span.set_attributes({
-        "gen_ai.response.model": "claude-agent-sdk",
+        "gen_ai.response.model": response_model,
         "kagent.session.id": session_id or "",
         "kagent.messages.total": total_messages,
         "kagent.result.length": result_length,
