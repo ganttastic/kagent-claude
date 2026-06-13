@@ -479,14 +479,6 @@ export KAGENT_NAMESPACE=default
 python examples/basic.py
 ```
 
-### Run tests
-
-```bash
-cd python/packages/kagent-claude
-pip install -e ".[dev]"
-pytest tests/
-```
-
 ### Test with an A2A request
 
 ```bash
@@ -504,6 +496,14 @@ curl -X POST http://localhost:8080/ \
       }
     }
   }'
+```
+
+## Development
+
+```bash
+pip install -e "python/packages/kagent-claude[dev]"
+make test    # 209 tests, ~0.4s
+make lint    # ruff check
 ```
 
 ## Limitations
