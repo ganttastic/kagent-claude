@@ -40,8 +40,8 @@ kubectl apply -f examples/agent.yaml
 ```
 
 The published golden image (`ghcr.io/ganttastic/kagent-claude`) is fully
-configurable via environment variables. Customize tools, system prompt,
-timeouts, HITL, MCP servers, and skills directly in the Agent CRD:
+configurable via environment variables. Customize model, tools, system prompt,
+timeouts, HITL, MCP servers, security posture, and skills directly in the Agent CRD:
 
 ```yaml
 apiVersion: kagent.dev/v1alpha2
@@ -61,6 +61,8 @@ spec:
             secretKeyRef:
               name: kagent-anthropic
               key: ANTHROPIC_API_KEY
+        - name: CLAUDE_MODEL
+          value: "claude-sonnet-4-5"
         - name: CLAUDE_TOOLS
           value: "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch"
         - name: CLAUDE_SYSTEM_PROMPT
@@ -141,9 +143,17 @@ All [Claude Agent SDK options](https://code.claude.com/docs/en/agent-sdk/overvie
 
 ```python
 ClaudeAgentOptions(
+    model="claude-sonnet-4-5",          # Which model to use
+    fallback_model="claude-haiku-4",    # Auto-failover if primary unavailable
     allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"],
+    disallowed_tools=["WebSearch"],     # Block specific tools entirely
     system_prompt="You are a helpful coding assistant.",
     max_turns=10,
+    permission_mode="acceptEdits",      # Security posture for tool execution
+    max_budget_usd=5.0,                 # Cost cap per execution
+    effort="high",                      # Reasoning depth (low/medium/high/xhigh/max)
+    add_dirs=["/data/shared"],          # Additional directory access
+    strict_mcp_config=True,             # Ignore project .mcp.json files
     mcp_servers={
         "my-server": {
             "command": "npx",
@@ -152,6 +162,33 @@ ClaudeAgentOptions(
     },
 )
 ```
+
+#### Golden Image Environment Variables
+
+When using the golden image, all SDK options are configurable via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLAUDE_MODEL` | *(SDK default)* | Claude model (e.g., `claude-sonnet-4-5`, `claude-opus-4-5`) |
+| `CLAUDE_FALLBACK_MODEL` | *(none)* | Fallback model if primary is unavailable |
+| `CLAUDE_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep` | Comma-separated allowed tool list |
+| `CLAUDE_DISALLOWED_TOOLS` | *(none)* | Comma-separated tools to block entirely |
+| `CLAUDE_SYSTEM_PROMPT` | *(none)* | System prompt for Claude |
+| `CLAUDE_MAX_TURNS` | `25` | Max conversation turns |
+| `CLAUDE_PERMISSION_MODE` | *(SDK default)* | `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` |
+| `CLAUDE_MAX_BUDGET_USD` | *(unlimited)* | Maximum budget in USD per execution |
+| `CLAUDE_EFFORT` | *(SDK default)* | Reasoning effort: `low`, `medium`, `high`, `xhigh`, `max` |
+| `CLAUDE_ADD_DIRS` | *(none)* | Comma-separated additional directory paths |
+| `CLAUDE_STRICT_MCP_CONFIG` | `false` | Only use MCP servers from `CLAUDE_MCP_SERVERS` |
+| `CLAUDE_MCP_SERVERS` | *(none)* | JSON object of MCP server configs |
+| `CLAUDE_ALLOWED_MCP_TOOLS` | *(all)* | MCP tool patterns to auto-approve |
+| `CLAUDE_TIMEOUT` | `300` | Execution timeout in seconds |
+| `CLAUDE_STREAMING` | `true` | Stream tool calls/results to dashboard |
+| `CLAUDE_HITL` | `false` | Require user approval for tool use |
+| `CLAUDE_HITL_TIMEOUT` | `600` | Timeout when HITL enabled |
+| `CLAUDE_SKILLS` | `false` | Enable skill discovery |
+| `CLAUDE_SKILLS_FILTER` | *(all)* | Comma-separated skill names to enable |
+| `CLAUDE_CWD` | `/app` | Working directory for skill discovery |
 
 ### ClaudeAgentExecutorConfig
 

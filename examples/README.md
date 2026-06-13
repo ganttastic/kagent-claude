@@ -66,11 +66,19 @@ All variables are optional except `ANTHROPIC_API_KEY`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `CLAUDE_MODEL` | *(SDK default)* | Claude model to use (e.g., `claude-sonnet-4-5`, `claude-opus-4-5`) |
+| `CLAUDE_FALLBACK_MODEL` | *(none)* | Fallback model if primary is unavailable |
 | `CLAUDE_TOOLS` | `Bash,Read,Write,Edit,Glob,Grep` | Comma-separated tool list |
+| `CLAUDE_DISALLOWED_TOOLS` | *(none)* | Comma-separated tools to block entirely (removed from model context) |
 | `CLAUDE_SYSTEM_PROMPT` | *(none)* | System prompt for Claude |
 | `CLAUDE_MAX_TURNS` | `25` | Max turns before Claude stops |
+| `CLAUDE_PERMISSION_MODE` | *(SDK default)* | Permission mode: `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` |
+| `CLAUDE_MAX_BUDGET_USD` | *(unlimited)* | Maximum budget in USD per execution |
+| `CLAUDE_EFFORT` | *(SDK default)* | Reasoning effort: `low`, `medium`, `high`, `xhigh`, `max` |
+| `CLAUDE_ADD_DIRS` | *(none)* | Comma-separated absolute paths for additional directory access |
 | `CLAUDE_MCP_SERVERS` | *(none)* | JSON object of MCP server configs (see [MCP Servers](#mcp-servers)) |
 | `CLAUDE_ALLOWED_MCP_TOOLS` | *(all from configured servers)* | Comma-separated MCP tool patterns to auto-approve (see [MCP Servers](#mcp-servers)) |
+| `CLAUDE_STRICT_MCP_CONFIG` | `false` | Only use MCP servers from `CLAUDE_MCP_SERVERS`, ignore all other sources |
 
 ### Skills
 

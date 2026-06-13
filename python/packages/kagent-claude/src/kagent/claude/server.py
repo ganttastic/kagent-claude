@@ -32,6 +32,19 @@ Environment Variables:
     CLAUDE_EFFORT           Effort level for Claude's reasoning. Default: none
                             (SDK default, typically "high").
                             Options: low, medium, high, xhigh, max.
+    CLAUDE_DISALLOWED_TOOLS Comma-separated tool names to block entirely.
+                            These tools are removed from the model's context
+                            and cannot be used even if otherwise allowed.
+                            Default: none.
+                            Example: "Bash,Write" (read-only research agent).
+    CLAUDE_ADD_DIRS         Comma-separated absolute paths Claude can access
+                            beyond CLAUDE_CWD. Use for mounted volumes.
+                            Default: none.
+                            Example: "/data/shared,/mnt/datasets"
+    CLAUDE_STRICT_MCP_CONFIG
+                            When true, only use MCP servers from
+                            CLAUDE_MCP_SERVERS — ignore project .mcp.json
+                            and all other MCP config sources. Default: false.
     CLAUDE_MCP_SERVERS      JSON object mapping server names to their config.
                             Supports both stdio servers (command/args) and
                             remote HTTP/SSE servers (type/url/headers).
@@ -246,6 +259,28 @@ def _parse_effort(val: str) -> str | None:
     return None
 
 
+def _parse_tools_list(val: str) -> list[str]:
+    """Parse a comma-separated tool list, returning empty list if unset."""
+    if not val:
+        return []
+    return [t.strip() for t in val.split(",") if t.strip()]
+
+
+def _parse_dirs(val: str) -> list[str]:
+    """Parse a comma-separated list of directory paths."""
+    if not val:
+        return []
+    dirs = [d.strip() for d in val.split(",") if d.strip()]
+    # Warn about non-absolute paths (they won't work reliably in containers)
+    for d in dirs:
+        if not d.startswith("/"):
+            logger.warning(
+                f"CLAUDE_ADD_DIRS contains non-absolute path {d!r}. "
+                "Use absolute paths for reliable container access."
+            )
+    return dirs
+
+
 def build_app() -> KAgentApp:
     """Build a KAgentApp from environment variables."""
     # --- Claude SDK options ---
@@ -258,6 +293,9 @@ def build_app() -> KAgentApp:
     max_budget_raw = _env("CLAUDE_MAX_BUDGET_USD")
     max_budget_usd = _env_float("CLAUDE_MAX_BUDGET_USD") if max_budget_raw else None
     effort = _parse_effort(_env("CLAUDE_EFFORT"))
+    disallowed_tools = _parse_tools_list(_env("CLAUDE_DISALLOWED_TOOLS"))
+    add_dirs = _parse_dirs(_env("CLAUDE_ADD_DIRS"))
+    strict_mcp_config = _env_bool("CLAUDE_STRICT_MCP_CONFIG", False)
 
     options_kwargs: dict = {"allowed_tools": tools}
     if model:
@@ -274,6 +312,12 @@ def build_app() -> KAgentApp:
         options_kwargs["max_budget_usd"] = max_budget_usd
     if effort:
         options_kwargs["effort"] = effort
+    if disallowed_tools:
+        options_kwargs["disallowed_tools"] = disallowed_tools
+    if add_dirs:
+        options_kwargs["add_dirs"] = add_dirs
+    if strict_mcp_config:
+        options_kwargs["strict_mcp_config"] = True
 
     # MCP servers
     mcp_servers = _parse_mcp_servers(_env("CLAUDE_MCP_SERVERS"))
@@ -367,12 +411,15 @@ def build_app() -> KAgentApp:
         f"kagent-claude server configured: "
         f"name={agent_name} model={model or 'default'} "
         f"fallback_model={fallback_model or 'none'} "
-        f"tools={tools} hitl={enable_hitl} "
+        f"tools={tools} disallowed_tools={disallowed_tools or 'none'} "
+        f"hitl={enable_hitl} "
         f"streaming={enable_streaming} timeout={timeout}s "
         f"max_turns={max_turns} tracing={enable_tracing} "
         f"permission_mode={permission_mode or 'default'} "
         f"max_budget_usd={max_budget_usd or 'unlimited'} "
         f"effort={effort or 'default'} "
+        f"add_dirs={add_dirs or 'none'} "
+        f"strict_mcp_config={strict_mcp_config} "
         f"mcp_servers={mcp_names} skills={skills_info}"
     )
 

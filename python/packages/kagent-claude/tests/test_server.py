@@ -13,11 +13,13 @@ from kagent.claude.server import (
     _env_float,
     _env_int,
     _interpolate_env_vars,
+    _parse_dirs,
     _parse_effort,
     _parse_mcp_servers,
     _parse_permission_mode,
     _parse_skills,
     _parse_tools,
+    _parse_tools_list,
     build_app,
 )
 
@@ -383,6 +385,71 @@ class TestParseEffort:
 
 
 # ---------------------------------------------------------------------------
+# _parse_tools_list
+# ---------------------------------------------------------------------------
+
+
+class TestParseToolsList:
+    def test_empty_string_returns_empty_list(self):
+        assert _parse_tools_list("") == []
+
+    def test_comma_separated(self):
+        result = _parse_tools_list("Bash,Write,Edit")
+        assert result == ["Bash", "Write", "Edit"]
+
+    def test_strips_whitespace(self):
+        result = _parse_tools_list(" Bash , Write ")
+        assert result == ["Bash", "Write"]
+
+    def test_filters_empty_items(self):
+        result = _parse_tools_list("Bash,,Write,,,")
+        assert result == ["Bash", "Write"]
+
+    def test_single_tool(self):
+        result = _parse_tools_list("Bash")
+        assert result == ["Bash"]
+
+
+# ---------------------------------------------------------------------------
+# _parse_dirs
+# ---------------------------------------------------------------------------
+
+
+class TestParseDirs:
+    def test_empty_string_returns_empty_list(self):
+        assert _parse_dirs("") == []
+
+    def test_comma_separated_absolute_paths(self):
+        result = _parse_dirs("/data/shared,/mnt/datasets")
+        assert result == ["/data/shared", "/mnt/datasets"]
+
+    def test_strips_whitespace(self):
+        result = _parse_dirs(" /data , /mnt ")
+        assert result == ["/data", "/mnt"]
+
+    def test_filters_empty_items(self):
+        result = _parse_dirs("/data,,/mnt,,,")
+        assert result == ["/data", "/mnt"]
+
+    def test_single_path(self):
+        result = _parse_dirs("/data/shared")
+        assert result == ["/data/shared"]
+
+    def test_warns_on_relative_path(self):
+        with patch("kagent.claude.server.logger") as mock_logger:
+            result = _parse_dirs("relative/path,/absolute/path")
+            assert result == ["relative/path", "/absolute/path"]
+            mock_logger.warning.assert_called_once()
+            assert "non-absolute" in mock_logger.warning.call_args[0][0]
+
+    def test_multiple_relative_paths_warn_each(self):
+        with patch("kagent.claude.server.logger") as mock_logger:
+            result = _parse_dirs("foo,bar")
+            assert result == ["foo", "bar"]
+            assert mock_logger.warning.call_count == 2
+
+
+# ---------------------------------------------------------------------------
 # build_app
 # ---------------------------------------------------------------------------
 
@@ -674,3 +741,76 @@ class TestBuildApp:
         assert options_kwargs["permission_mode"] == "acceptEdits"
         assert options_kwargs["max_budget_usd"] == pytest.approx(10.0)
         assert options_kwargs["effort"] == "medium"
+
+    def test_disallowed_tools_set(self):
+        _, MockOptions, _, _ = self._build_with_env(
+            {"CLAUDE_DISALLOWED_TOOLS": "Bash,Write"}
+        )
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["disallowed_tools"] == ["Bash", "Write"]
+
+    def test_disallowed_tools_not_set_by_default(self):
+        _, MockOptions, _, _ = self._build_with_env({})
+        options_kwargs = MockOptions.call_args[1]
+        assert "disallowed_tools" not in options_kwargs
+
+    def test_disallowed_tools_single(self):
+        _, MockOptions, _, _ = self._build_with_env(
+            {"CLAUDE_DISALLOWED_TOOLS": "Bash"}
+        )
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["disallowed_tools"] == ["Bash"]
+
+    def test_add_dirs_set(self):
+        _, MockOptions, _, _ = self._build_with_env(
+            {"CLAUDE_ADD_DIRS": "/data/shared,/mnt/datasets"}
+        )
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["add_dirs"] == ["/data/shared", "/mnt/datasets"]
+
+    def test_add_dirs_not_set_by_default(self):
+        _, MockOptions, _, _ = self._build_with_env({})
+        options_kwargs = MockOptions.call_args[1]
+        assert "add_dirs" not in options_kwargs
+
+    def test_add_dirs_single_path(self):
+        _, MockOptions, _, _ = self._build_with_env(
+            {"CLAUDE_ADD_DIRS": "/data/shared"}
+        )
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["add_dirs"] == ["/data/shared"]
+
+    def test_strict_mcp_config_true(self):
+        _, MockOptions, _, _ = self._build_with_env(
+            {"CLAUDE_STRICT_MCP_CONFIG": "true"}
+        )
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["strict_mcp_config"] is True
+
+    def test_strict_mcp_config_not_set_by_default(self):
+        _, MockOptions, _, _ = self._build_with_env({})
+        options_kwargs = MockOptions.call_args[1]
+        assert "strict_mcp_config" not in options_kwargs
+
+    def test_strict_mcp_config_false_not_set(self):
+        _, MockOptions, _, _ = self._build_with_env(
+            {"CLAUDE_STRICT_MCP_CONFIG": "false"}
+        )
+        options_kwargs = MockOptions.call_args[1]
+        assert "strict_mcp_config" not in options_kwargs
+
+    def test_security_hardened_agent(self):
+        """Integration test: a fully locked-down read-only agent."""
+        _, MockOptions, _, _ = self._build_with_env({
+            "CLAUDE_TOOLS": "Read,Glob,Grep",
+            "CLAUDE_DISALLOWED_TOOLS": "Bash,Write,Edit",
+            "CLAUDE_PERMISSION_MODE": "dontAsk",
+            "CLAUDE_STRICT_MCP_CONFIG": "true",
+            "CLAUDE_MAX_BUDGET_USD": "2.0",
+        })
+        options_kwargs = MockOptions.call_args[1]
+        assert options_kwargs["allowed_tools"] == ["Read", "Glob", "Grep"]
+        assert options_kwargs["disallowed_tools"] == ["Bash", "Write", "Edit"]
+        assert options_kwargs["permission_mode"] == "dontAsk"
+        assert options_kwargs["strict_mcp_config"] is True
+        assert options_kwargs["max_budget_usd"] == pytest.approx(2.0)
