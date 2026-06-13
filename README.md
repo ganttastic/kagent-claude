@@ -1,6 +1,7 @@
 # kagent-claude
 
 [![CI](https://github.com/ganttastic/kagent-claude/actions/workflows/ci.yml/badge.svg)](https://github.com/ganttastic/kagent-claude/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/ganttastic/kagent-claude/graph/badge.svg)](https://codecov.io/gh/ganttastic/kagent-claude)
 [![PyPI](https://img.shields.io/pypi/v/kagent-claude)](https://pypi.org/project/kagent-claude/)
 [![Python](https://img.shields.io/pypi/pyversions/kagent-claude)](https://pypi.org/project/kagent-claude/)
 [![License](https://img.shields.io/github/license/ganttastic/kagent-claude)](https://github.com/ganttastic/kagent-claude/blob/main/LICENSE)
