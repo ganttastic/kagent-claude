@@ -126,11 +126,20 @@ def _env_float(key: str, default: float = 0.0) -> float:
         return default
 
 
-def _parse_tools(val: str) -> list[str]:
-    """Parse a comma-separated tool list."""
+def _parse_comma_list(val: str) -> list[str]:
+    """Parse a comma-separated list, stripping whitespace and filtering empties."""
     if not val:
-        return ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
-    return [t.strip() for t in val.split(",") if t.strip()]
+        return []
+    return [item.strip() for item in val.split(",") if item.strip()]
+
+
+# Default tool set for the golden image when CLAUDE_TOOLS is unset.
+_DEFAULT_TOOLS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+
+
+def _parse_tools(val: str) -> list[str]:
+    """Parse a comma-separated tool list, returning defaults if unset."""
+    return _parse_comma_list(val) or _DEFAULT_TOOLS
 
 
 # Matches $VAR_NAME or ${VAR_NAME} (not escaped with $$)
@@ -259,13 +268,6 @@ def _parse_effort(val: str) -> str | None:
     return None
 
 
-def _parse_tools_list(val: str) -> list[str]:
-    """Parse a comma-separated tool list, returning empty list if unset."""
-    if not val:
-        return []
-    return [t.strip() for t in val.split(",") if t.strip()]
-
-
 def _parse_dirs(val: str) -> list[str]:
     """Parse a comma-separated list of directory paths."""
     if not val:
@@ -293,7 +295,7 @@ def build_app() -> KAgentApp:
     max_budget_raw = _env("CLAUDE_MAX_BUDGET_USD")
     max_budget_usd = _env_float("CLAUDE_MAX_BUDGET_USD") if max_budget_raw else None
     effort = _parse_effort(_env("CLAUDE_EFFORT"))
-    disallowed_tools = _parse_tools_list(_env("CLAUDE_DISALLOWED_TOOLS"))
+    disallowed_tools = _parse_comma_list(_env("CLAUDE_DISALLOWED_TOOLS"))
     add_dirs = _parse_dirs(_env("CLAUDE_ADD_DIRS"))
     strict_mcp_config = _env_bool("CLAUDE_STRICT_MCP_CONFIG", False)
 
@@ -328,7 +330,7 @@ def build_app() -> KAgentApp:
         #   - comma-separated: explicit tool patterns (e.g., "mcp__fetch__*,mcp__github__list_issues")
         mcp_tool_patterns = _env("CLAUDE_ALLOWED_MCP_TOOLS")
         if mcp_tool_patterns:
-            mcp_tools = [t.strip() for t in mcp_tool_patterns.split(",") if t.strip()]
+            mcp_tools = _parse_comma_list(mcp_tool_patterns)
         else:
             # Default: wildcard for every configured server
             mcp_tools = [f"mcp__{name}__*" for name in mcp_servers]
@@ -344,7 +346,7 @@ def build_app() -> KAgentApp:
         # Enable all discovered skills, or a specific comma-separated list
         skills_filter = _env("CLAUDE_SKILLS_FILTER")
         if skills_filter:
-            options_kwargs["skills"] = [s.strip() for s in skills_filter.split(",") if s.strip()]
+            options_kwargs["skills"] = _parse_comma_list(skills_filter)
         else:
             options_kwargs["skills"] = "all"
 

@@ -13,13 +13,13 @@ from kagent.claude.server import (
     _env_float,
     _env_int,
     _interpolate_env_vars,
+    _parse_comma_list,
     _parse_dirs,
     _parse_effort,
     _parse_mcp_servers,
     _parse_permission_mode,
     _parse_skills,
     _parse_tools,
-    _parse_tools_list,
     build_app,
 )
 
@@ -385,28 +385,28 @@ class TestParseEffort:
 
 
 # ---------------------------------------------------------------------------
-# _parse_tools_list
+# _parse_comma_list
 # ---------------------------------------------------------------------------
 
 
-class TestParseToolsList:
+class TestParseCommaList:
     def test_empty_string_returns_empty_list(self):
-        assert _parse_tools_list("") == []
+        assert _parse_comma_list("") == []
 
     def test_comma_separated(self):
-        result = _parse_tools_list("Bash,Write,Edit")
+        result = _parse_comma_list("Bash,Write,Edit")
         assert result == ["Bash", "Write", "Edit"]
 
     def test_strips_whitespace(self):
-        result = _parse_tools_list(" Bash , Write ")
+        result = _parse_comma_list(" Bash , Write ")
         assert result == ["Bash", "Write"]
 
     def test_filters_empty_items(self):
-        result = _parse_tools_list("Bash,,Write,,,")
+        result = _parse_comma_list("Bash,,Write,,,")
         assert result == ["Bash", "Write"]
 
-    def test_single_tool(self):
-        result = _parse_tools_list("Bash")
+    def test_single_item(self):
+        result = _parse_comma_list("Bash")
         assert result == ["Bash"]
 
 
