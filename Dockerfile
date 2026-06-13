@@ -21,6 +21,7 @@ ENV CLAUDE_TOOLS="Bash,Read,Write,Edit,Glob,Grep" \
     CLAUDE_TIMEOUT="300" \
     CLAUDE_STREAMING="true" \
     CLAUDE_HITL="false" \
+    CLAUDE_STRICT_MCP_CONFIG="false" \
     AGENT_PORT="8080" \
     AGENT_TRACING="true"
 
