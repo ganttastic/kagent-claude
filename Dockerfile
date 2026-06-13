@@ -7,17 +7,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && \
 
 # Create a non-root user — Claude CLI refuses --dangerously-skip-permissions as root
 RUN useradd -m -s /bin/bash -u 1000 claude && chown -R claude:claude /app
-USER claude
 
 # Version is injected at build time from the git tag.
 # Needed because hatch-vcs can't detect version without .git directory.
 ARG VERSION=0.0.0
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION}
 
-# Copy the package source and install from local.
-COPY --chown=claude:claude python/packages/kagent-claude /tmp/kagent-claude
-RUN pip install --no-cache-dir --no-warn-script-location --pre /tmp/kagent-claude && \
+# Copy the package source and install from local (as root for system-wide install).
+COPY python/packages/kagent-claude /tmp/kagent-claude
+RUN pip install --no-cache-dir --pre /tmp/kagent-claude && \
     rm -rf /tmp/kagent-claude
+
+# Switch to non-root user for runtime
+USER claude
 
 # Default env vars — override in your Agent CRD or docker run.
 ENV CLAUDE_TOOLS="Bash,Read,Write,Edit,Glob,Grep" \
